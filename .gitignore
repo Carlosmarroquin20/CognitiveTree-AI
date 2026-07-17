@@ -1,0 +1,58 @@
+# Python bytecode and interpreter artifacts
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# Packaging and build output
+build/
+dist/
+*.egg-info/
+*.egg
+.eggs/
+pip-wheel-metadata/
+
+# Virtual environments
+.venv/
+venv/
+env/
+.python-version
+
+# Test, coverage, and type-check caches
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.mypy_cache/
+.ruff_cache/
+
+# Secrets and local configuration (model keys, sandbox credentials)
+.env
+.env.*
+*.local
+secrets/
+
+# Model weights and large artifacts (Phase 2+ backends)
+*.gguf
+*.safetensors
+models/
+checkpoints/
+
+# Logs and runtime output
+*.log
+logs/
+runs/
+
+# IDE and editor state
+.vscode/
+.idea/
+*.swp
+
+# OS metadata
+Thumbs.db
+Desktop.ini
+.DS_Store
+
+# Claude Code local settings
+.claude/settings.local.json
