@@ -10,7 +10,7 @@ applying a critique loop with backtracking.
 | Phase | Scope | Status |
 |-------|-------|--------|
 | 1 | Core state machine, node architecture, MCTS / Tree-of-Thoughts logic | **Complete** |
-| 2 | Isolated Docker sandbox environment and execution interfacing | Pending |
+| 2 | Isolated Docker sandbox environment and execution interfacing | **Complete** |
 | 3 | Critique, reward scoring, and backtracking controller loop | Pending |
 | 4 | LangGraph / native graph integration and streaming UI | Pending |
 
@@ -105,6 +105,39 @@ escaping the run.
 | `cognitivetree/policies.py` | `ThoughtGenerator` / `ThoughtEvaluator` protocols and the `Evaluation` verdict |
 | `cognitivetree/search.py` | MCTS controller, event emission, `SearchResult` |
 | `cognitivetree/demo.py` | Deterministic reference domain exercising the full loop without model dependencies |
+| `cognitivetree/sandbox/spec.py` | Execution contracts: `ExecutionRequest` / `ExecutionResult`, `ResourceLimits`, status taxonomy |
+| `cognitivetree/sandbox/executor.py` | `CodeExecutor` protocol implemented by every backend |
+| `cognitivetree/sandbox/docker_executor.py` | Hardened single-use container backend and image bootstrap |
+| `cognitivetree/sandbox/subprocess_executor.py` | Host-process fallback for hosts without a Docker daemon (no isolation) |
+| `cognitivetree/sandbox/extraction.py` | Fenced-code payload extraction from thought content |
+| `cognitivetree/sandbox/evaluation.py` | `CodeExecutionEvaluator` bridging execution verdicts into the search core |
+| `cognitivetree/sandbox/image/Dockerfile` | Minimal-surface sandbox image (no pip, unprivileged user) |
+| `cognitivetree/sandbox/demo.py` | End-to-end demo: search converging on execution-validated code |
+
+## Sandbox Security Model (Phase 2)
+
+Every payload runs in a fresh, disposable container with a defense-in-depth
+profile applied at `docker run` time:
+
+| Control | Flag | Effect |
+|---------|------|--------|
+| Network isolation | `--network none` | No egress or ingress whatsoever |
+| Filesystem | `--read-only` + `--tmpfs /tmp` | Immutable rootfs; only a size-capped scratch tmpfs is writable |
+| Privileges | `--cap-drop ALL`, `--security-opt no-new-privileges`, `--user 65534:65534` | No capabilities, no escalation, unprivileged uid |
+| Memory | `--memory` = `--memory-swap` | Hard cap with swap escape closed |
+| CPU / processes | `--cpus`, `--pids-limit` | Quota enforcement; fork bombs bounded |
+| Lifetime | `--rm` + deadline kill | Timed-out containers are force-removed |
+
+Payloads reach the interpreter as an exec-form `python -I -c` argument —
+never through a shell — and captured output is clipped at a configurable
+limit before it re-enters the framework. The image itself ships without
+`pip`/`setuptools`, so a compromised payload cannot install dependencies.
+
+Execution outcomes are classified in three tiers: `COMPLETED` (the payload
+ran; the exit code carries the verdict), `TIMEOUT` (killed at the deadline),
+and `SANDBOX_ERROR` (infrastructure fault). Only the last one raises into the
+search loop — producing a `FAILED` run — so infrastructure problems are never
+misread as "the reasoning was wrong."
 
 ## Quickstart
 
@@ -119,7 +152,17 @@ python -m pytest
 
 # Run the deterministic reference search end-to-end
 python -m cognitivetree.demo
+
+# Build the sandbox image (requires a running Docker daemon)
+docker build --tag cognitivetree-sandbox:latest cognitivetree/sandbox/image
+
+# Run the execution-grounded search demo (prefers Docker, falls back to
+# a non-isolated host process when no daemon is reachable)
+python -m cognitivetree.sandbox.demo
 ```
+
+Docker-dependent integration tests skip automatically when the daemon or the
+sandbox image is unavailable, so the suite stays green on any host.
 
 The demo prints the live phase trace, the final ASCII tree (`*` evaluated,
 `x` pruned, `#` accepted terminal), and the recovered solution path.
