@@ -2,10 +2,12 @@
 
 The controller executes the canonical four-step MCTS cycle — selection,
 expansion, evaluation, backpropagation — under the supervision of the
-:class:`~cognitivetree.state.SearchStateMachine`. Dead branches collapse
-upward through structural backtracking: when every child of a node is pruned
-or failed, selection prunes the node itself and restarts from the root, so
-search effort flows back to the nearest viable ancestor.
+:class:`~cognitivetree.state.SearchStateMachine`. Backtracking operates on
+two levels: structurally, a node whose children have all failed is pruned so
+effort returns to the nearest viable ancestor; semantically, an optional
+:class:`~cognitivetree.policies.RevisionPolicy` can intercept that pruning
+and reopen the node for re-expansion with critique-derived revision notes,
+turning failure diagnoses into amended guidance for the generator.
 """
 
 from __future__ import annotations
@@ -17,7 +19,15 @@ from typing import Callable, Optional
 
 from cognitivetree.config import SearchConfig
 from cognitivetree.node import NodeStatus, ThoughtNode
-from cognitivetree.policies import ThoughtEvaluator, ThoughtGenerator
+from cognitivetree.policies import (
+    CRITIQUE_METADATA_KEY,
+    Critic,
+    Critique,
+    RevisionPolicy,
+    RewardModel,
+    ThoughtEvaluator,
+    ThoughtGenerator,
+)
 from cognitivetree.state import PhaseTransition, SearchPhase, SearchStateMachine
 from cognitivetree.tree import ThoughtTree
 
@@ -75,11 +85,23 @@ class TreeSearchController:
         generator: ThoughtGenerator,
         evaluator: ThoughtEvaluator,
         on_event: Optional[Callable[[SearchEvent], None]] = None,
+        critic: Optional[Critic] = None,
+        revision_policy: Optional[RevisionPolicy] = None,
+        reward_model: Optional[RewardModel] = None,
     ) -> None:
+        """Wires the search loop to its policies.
+
+        ``critic``, ``revision_policy``, and ``reward_model`` are optional;
+        when omitted the controller reproduces the plain Phase 1 behavior of
+        structural pruning and raw-score backpropagation.
+        """
         self._config = config
         self._generator = generator
         self._evaluator = evaluator
         self._on_event = on_event
+        self._critic = critic
+        self._revision_policy = revision_policy
+        self._reward_model = reward_model
         self._rng = random.Random(config.seed)
 
     def run(self, task: str) -> SearchResult:
@@ -93,12 +115,28 @@ class TreeSearchController:
         try:
             while iteration < self._config.max_iterations:
                 iteration += 1
-                node = self._select(tree)
+                revived: list[str] = []
+                node = self._select(tree, revived)
                 if node is None:
                     self._advance(
                         machine, SearchPhase.EXHAUSTED, iteration, None, "frontier empty"
                     )
                     break
+                if revived:
+                    self._advance(
+                        machine,
+                        SearchPhase.BACKTRACKING,
+                        iteration,
+                        node.id,
+                        "reopened node for revision attempt",
+                    )
+                    self._advance(
+                        machine,
+                        SearchPhase.SELECTION,
+                        iteration,
+                        node.id,
+                        "revision notes prepared",
+                    )
 
                 self._advance(machine, SearchPhase.EXPANSION, iteration, node.id, "")
                 children = self._expand(tree, node)
@@ -111,11 +149,6 @@ class TreeSearchController:
                         "expansion produced no candidates",
                     )
                     tree.prune_subtree(node)
-                    if self._select(tree) is None:
-                        self._advance(
-                            machine, SearchPhase.EXHAUSTED, iteration, None, "frontier empty"
-                        )
-                        break
                     self._advance(
                         machine, SearchPhase.SELECTION, iteration, None, "backtracked"
                     )
@@ -128,10 +161,10 @@ class TreeSearchController:
                     node.id,
                     f"{len(children)} candidates",
                 )
-                solution = self._evaluate(children)
+                solution, valued = self._evaluate(children)
 
                 self._advance(machine, SearchPhase.BACKPROPAGATION, iteration, node.id, "")
-                self._backpropagate(children)
+                self._backpropagate(valued)
 
                 if solution is not None:
                     self._advance(
@@ -168,13 +201,17 @@ class TreeSearchController:
             error=error,
         )
 
-    def _select(self, tree: ThoughtTree) -> ThoughtNode | None:
+    def _select(
+        self, tree: ThoughtTree, revived: list[str] | None = None
+    ) -> ThoughtNode | None:
         """Descends from the root via UCT to the next node worth expanding.
 
         Dead interior nodes discovered during descent are pruned and the walk
         restarts from the root; each restart removes at least one node from
-        the frontier, which bounds the loop. Returns ``None`` when the tree
-        holds no expandable node.
+        the frontier, which bounds the loop. A saturated node is offered to
+        the revision policy before pruning — a granted revision returns the
+        node for re-expansion and reports it through ``revived``. Returns
+        ``None`` when the tree holds no expandable node.
         """
         while True:
             node = tree.root
@@ -190,6 +227,15 @@ class TreeSearchController:
                     break
                 live_children = [c for c in node.children if c.is_live]
                 if not live_children:
+                    if (
+                        self._revision_policy is not None
+                        and self._revision_policy.revise(node)
+                    ):
+                        # Semantic backtracking: the saturated node returns to
+                        # the frontier carrying critique-derived notes.
+                        if revived is not None:
+                            revived.append(node.id)
+                        return node
                     # Fully saturated interior node: structural backtracking
                     # collapses it so effort returns to a viable ancestor.
                     tree.prune_subtree(node)
@@ -203,10 +249,14 @@ class TreeSearchController:
                 )
 
     def _expand(self, tree: ThoughtTree, node: ThoughtNode) -> list[ThoughtNode]:
-        """Materializes generator candidates as child nodes of ``node``."""
+        """Materializes generator candidates as child nodes of ``node``.
+
+        Existing children seed the deduplication set so a revised expansion
+        cannot resubmit a candidate that already failed.
+        """
         candidates = self._generator.generate(node, self._config.branching_factor)
         children: list[ThoughtNode] = []
-        seen: set[str] = set()
+        seen: set[str] = {child.content for child in node.children}
         for content in candidates[: self._config.branching_factor]:
             text = content.strip()
             if not text or text in seen:
@@ -215,14 +265,22 @@ class TreeSearchController:
             children.append(tree.add_child(node, text))
         return children
 
-    def _evaluate(self, children: list[ThoughtNode]) -> ThoughtNode | None:
-        """Scores each fresh child and returns the first accepted solution.
+    def _evaluate(
+        self, children: list[ThoughtNode]
+    ) -> tuple[ThoughtNode | None, list[tuple[ThoughtNode, float]]]:
+        """Scores each fresh child; returns the first accepted solution and
+        the per-child backpropagation values.
 
         Terminal verdicts below the acceptance threshold are pruned rather
         than kept live, because a completed line of reasoning cannot be
-        extended by further expansion.
+        extended by further expansion. Pruned children are offered to the
+        critic, whose diagnosis lands in node metadata and feeds both reward
+        shaping and later revision notes. Acceptance always operates on the
+        raw evaluator score; the reward model shapes only the value that
+        backpropagates.
         """
         solution: ThoughtNode | None = None
+        valued: list[tuple[ThoughtNode, float]] = []
         for child in children:
             verdict = self._evaluator.evaluate(child)
             if verdict.is_terminal and verdict.score >= self._config.accept_threshold:
@@ -232,15 +290,27 @@ class TreeSearchController:
             else:
                 status = NodeStatus.EVALUATED
             child.apply_evaluation(verdict.score, status, verdict.rationale)
+
+            critique: Critique | None = None
+            if self._critic is not None and status is NodeStatus.PRUNED:
+                critique = self._critic.critique(child)
+                if critique is not None:
+                    child.metadata[CRITIQUE_METADATA_KEY] = critique.to_dict()
+
+            value = verdict.score
+            if self._reward_model is not None:
+                value = self._reward_model.shape(child, verdict.score, critique)
+            valued.append((child, value))
+
             if status is NodeStatus.TERMINAL and solution is None:
                 solution = child
-        return solution
+        return solution, valued
 
-    def _backpropagate(self, children: list[ThoughtNode]) -> None:
-        """Propagates each child's score through its ancestor chain."""
-        for child in children:
+    def _backpropagate(self, valued: list[tuple[ThoughtNode, float]]) -> None:
+        """Propagates each child's shaped value through its ancestor chain."""
+        for child, value in valued:
             for node in child.path_from_root():
-                node.record_visit(child.score)
+                node.record_visit(value)
 
     def _advance(
         self,

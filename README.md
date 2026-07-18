@@ -11,7 +11,7 @@ applying a critique loop with backtracking.
 |-------|-------|--------|
 | 1 | Core state machine, node architecture, MCTS / Tree-of-Thoughts logic | **Complete** |
 | 2 | Isolated Docker sandbox environment and execution interfacing | **Complete** |
-| 3 | Critique, reward scoring, and backtracking controller loop | Pending |
+| 3 | Critique, reward scoring, and backtracking controller loop | **Complete** |
 | 4 | LangGraph / native graph integration and streaming UI | Pending |
 
 ## Architecture (Phase 1)
@@ -113,6 +113,49 @@ escaping the run.
 | `cognitivetree/sandbox/evaluation.py` | `CodeExecutionEvaluator` bridging execution verdicts into the search core |
 | `cognitivetree/sandbox/image/Dockerfile` | Minimal-surface sandbox image (no pip, unprivileged user) |
 | `cognitivetree/sandbox/demo.py` | End-to-end demo: search converging on execution-validated code |
+| `cognitivetree/feedback/execution_critic.py` | `ExecutionTraceCritic`: failure classification and revision guidance from execution records |
+| `cognitivetree/feedback/rewards.py` | `RewardShaper` / `RewardWeights`: composite backpropagation values with audit trail |
+| `cognitivetree/feedback/revision.py` | `BoundedRevisionPolicy` and revision-notes compilation |
+| `cognitivetree/feedback/demo.py` | End-to-end demo of the fail → critique → revise → succeed cycle |
+
+## Critique-Driven Backtracking (Phase 3)
+
+Backtracking operates on two levels. Structural backtracking (Phase 1)
+prunes a node whose children have all failed, returning effort to the nearest
+viable ancestor. Semantic backtracking (Phase 3) intercepts that pruning:
+
+1. When a child is pruned, the **critic** diagnoses the failure from its
+   execution record — assertion message, exception class, syntax fault, or
+   timeout — and stores a structured critique with actionable guidance in
+   ``node.metadata["critique"]``.
+2. When a node saturates (every child dead), the **revision policy** decides
+   whether it earns another attempt. `BoundedRevisionPolicy` grants at most
+   ``max_attempts`` revisions per node, requires critique guidance to learn
+   from, compiles the children's guidance into deduplicated
+   ``revision_notes``, and reopens the node.
+3. The **generator** reads the notes at re-expansion (an LLM backend injects
+   them into the prompt; the reference generators branch on them) and
+   proposes revised candidates. Deduplication against existing children
+   guarantees a failed candidate is never resubmitted verbatim.
+4. The **reward model** shapes the value that backpropagates: a weighted
+   blend of the raw evaluator score, the critique term (``1 − severity``),
+   and a shallowness term that biases search toward shorter chains. The
+   component breakdown is stored in ``node.metadata["reward"]``.
+
+Solution acceptance always operates on the raw evaluator score; shaping
+influences only where the search looks next. All Phase 3 hooks are optional
+constructor arguments on `TreeSearchController` — omitted, the controller
+reproduces the plain Phase 1 behavior exactly.
+
+### Node Metadata Registry
+
+| Key | Writer | Content |
+|-----|--------|---------|
+| `execution` | `CodeExecutionEvaluator` | Sandbox verdict: status, exit code, streams, duration |
+| `critique` | `TreeSearchController` (via `Critic`) | Failure class, summary, guidance, severity |
+| `reward` | `RewardShaper` | Component breakdown of the shaped value |
+| `revision_notes` | `BoundedRevisionPolicy` | Compiled guidance handed to the generator |
+| `revision_attempts` | `BoundedRevisionPolicy` | Consumed revision budget |
 
 ## Sandbox Security Model (Phase 2)
 
@@ -159,6 +202,9 @@ docker build --tag cognitivetree-sandbox:latest cognitivetree/sandbox/image
 # Run the execution-grounded search demo (prefers Docker, falls back to
 # a non-isolated host process when no daemon is reachable)
 python -m cognitivetree.sandbox.demo
+
+# Run the critique-driven backtracking demo (fail -> critique -> revise -> succeed)
+python -m cognitivetree.feedback.demo
 ```
 
 Docker-dependent integration tests skip automatically when the daemon or the
@@ -183,3 +229,12 @@ The demo prints the live phase trace, the final ASCII tree (`*` evaluated,
 - **Metadata extension point** — `ThoughtNode.metadata` carries
   phase-specific payloads (execution results, critique records) without
   schema churn in the core.
+- **Committing revision grants** — `RevisionPolicy.revise` prepares the node
+  (notes, attempt accounting) before answering, so a granted revision can
+  never be observed half-applied by the controller.
+- **Raw acceptance, shaped guidance** — reward shaping deliberately cannot
+  promote a failing thought into a solution; it only redirects exploration.
+- **Deterministic critics before LLM critics** — traceback classification
+  covers the execution-grounded failure modes without model calls; an LLM
+  critic implements the same `Critic` protocol in Phase 4 for semantic
+  failures that leave no traceback.

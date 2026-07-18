@@ -8,7 +8,16 @@ hosts the controller that drives the MCTS / Tree-of-Thoughts loop.
 
 from cognitivetree.config import SearchConfig
 from cognitivetree.node import NodeStatus, ThoughtNode
-from cognitivetree.policies import Evaluation, ThoughtEvaluator, ThoughtGenerator
+from cognitivetree.policies import (
+    Critic,
+    Critique,
+    Evaluation,
+    FailureClass,
+    RevisionPolicy,
+    RewardModel,
+    ThoughtEvaluator,
+    ThoughtGenerator,
+)
 from cognitivetree.search import (
     SearchEvent,
     SearchOutcome,
@@ -26,10 +35,15 @@ from cognitivetree.tree import ThoughtTree
 __version__ = "0.1.0"
 
 __all__ = [
+    "Critic",
+    "Critique",
     "Evaluation",
+    "FailureClass",
     "InvalidTransitionError",
     "NodeStatus",
     "PhaseTransition",
+    "RevisionPolicy",
+    "RewardModel",
     "SearchConfig",
     "SearchEvent",
     "SearchOutcome",
