@@ -24,6 +24,12 @@ from cognitivetree.search import (
     SearchResult,
     TreeSearchController,
 )
+from cognitivetree.session import (
+    LlmSessionSpec,
+    ReasoningSession,
+    build_llm_session,
+    build_reference_session,
+)
 from cognitivetree.state import (
     InvalidTransitionError,
     PhaseTransition,
@@ -40,8 +46,10 @@ __all__ = [
     "Evaluation",
     "FailureClass",
     "InvalidTransitionError",
+    "LlmSessionSpec",
     "NodeStatus",
     "PhaseTransition",
+    "ReasoningSession",
     "RevisionPolicy",
     "RewardModel",
     "SearchConfig",
@@ -55,4 +63,6 @@ __all__ = [
     "ThoughtNode",
     "ThoughtTree",
     "TreeSearchController",
+    "build_llm_session",
+    "build_reference_session",
 ]

@@ -16,14 +16,8 @@ from dataclasses import dataclass
 
 from cognitivetree.config import SearchConfig
 from cognitivetree.node import ThoughtNode
-from cognitivetree.sandbox.docker_executor import (
-    DockerSandboxConfig,
-    DockerSandboxExecutor,
-    ensure_image,
-)
+from cognitivetree.sandbox.backends import select_executor
 from cognitivetree.sandbox.evaluation import CodeExecutionEvaluator
-from cognitivetree.sandbox.executor import CodeExecutor
-from cognitivetree.sandbox.subprocess_executor import SubprocessExecutor
 from cognitivetree.search import TreeSearchController
 
 CANDIDATE_IMPLEMENTATIONS: tuple[str, ...] = (
@@ -56,18 +50,6 @@ class CandidateImplementationGenerator:
         if not node.is_root:
             return []
         return list(self.candidates[:k])
-
-
-def select_executor() -> tuple[CodeExecutor, str]:
-    """Returns the strongest available execution backend and its description."""
-    if DockerSandboxExecutor.is_available():
-        config = DockerSandboxConfig()
-        ensure_image(config, build_if_missing=True)
-        return DockerSandboxExecutor(config), f"docker ({config.image})"
-    return (
-        SubprocessExecutor(),
-        "subprocess fallback (no isolation; Docker daemon unreachable)",
-    )
 
 
 def main() -> None:

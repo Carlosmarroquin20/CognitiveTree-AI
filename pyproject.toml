@@ -12,6 +12,10 @@ dependencies = []
 
 [project.optional-dependencies]
 dev = ["pytest>=8.0"]
+langgraph = ["langgraph>=0.2"]
+
+[project.scripts]
+cognitivetree-ui = "cognitivetree.ui.serve:main"
 
 [tool.setuptools.packages.find]
 include = ["cognitivetree*"]

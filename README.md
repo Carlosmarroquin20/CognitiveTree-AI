@@ -12,7 +12,7 @@ applying a critique loop with backtracking.
 | 1 | Core state machine, node architecture, MCTS / Tree-of-Thoughts logic | **Complete** |
 | 2 | Isolated Docker sandbox environment and execution interfacing | **Complete** |
 | 3 | Critique, reward scoring, and backtracking controller loop | **Complete** |
-| 4 | LangGraph / native graph integration and streaming UI | Pending |
+| 4 | LLM backends, LangGraph integration, and streaming UI | **Complete** |
 
 ## Architecture (Phase 1)
 
@@ -117,6 +117,68 @@ escaping the run.
 | `cognitivetree/feedback/rewards.py` | `RewardShaper` / `RewardWeights`: composite backpropagation values with audit trail |
 | `cognitivetree/feedback/revision.py` | `BoundedRevisionPolicy` and revision-notes compilation |
 | `cognitivetree/feedback/demo.py` | End-to-end demo of the fail → critique → revise → succeed cycle |
+| `cognitivetree/llm/client.py` | Completion contracts: `LlmClient`, `ChatMessage`, `CompletionRequest/Response` |
+| `cognitivetree/llm/openai_compatible.py` | HTTP client for Ollama / vLLM / llama.cpp / LM Studio, injected transport, bounded retries |
+| `cognitivetree/llm/generator.py` | `LlmThoughtGenerator`: path- and revision-aware expansion prompting |
+| `cognitivetree/llm/critic.py` | `LlmCritic`: JSON-verdict semantic critique, degrades instead of failing |
+| `cognitivetree/llm/prompts.py` | Auditable prompt templates for the LLM policies |
+| `cognitivetree/feedback/composite.py` | `ChainedCritic`: deterministic critic first, model critic second |
+| `cognitivetree/sandbox/backends.py` | Executor selection with TTL-cached daemon probing |
+| `cognitivetree/session.py` | `ReasoningSession` lifecycle plus reference / LLM assembly factories |
+| `cognitivetree/ui/` | SSE event vocabulary, threaded HTTP server, embedded single-file client, CLI |
+| `cognitivetree/integrations/langgraph_adapter.py` | Optional LangGraph embedding of full reasoning runs |
+
+## LLM Backends and Streaming Interface (Phase 4)
+
+### Model backends
+
+Every targeted open-source runtime (Ollama, vLLM, llama.cpp server, LM
+Studio) speaks the OpenAI-compatible chat-completions dialect, so one
+standard-library client covers them all. `LlmThoughtGenerator` prompts with
+the task, the reasoning path, and any revision notes; candidates come back
+separated by `### CANDIDATE` markers, which survive embedded code fences.
+`LlmCritic` requests a strict JSON verdict and **degrades to `None`** on
+backend or parse failures — a network blip never aborts a search — while
+generator failures deliberately fail the run, since expansion is essential.
+
+```bash
+# Deterministic reference scenario (no model, full critique loop)
+python -m cognitivetree.ui.serve
+
+# Llama 3.3 via Ollama
+python -m cognitivetree.ui.serve --backend llm \
+    --base-url http://localhost:11434/v1 --model llama3.3 \
+    --task "Implement a run-length encoder as encode(text)." \
+    --harness-file checks.py
+
+# Qwen 2.5 via vLLM, with the chained LLM critic
+python -m cognitivetree.ui.serve --backend llm \
+    --base-url http://localhost:8000/v1 --model Qwen/Qwen2.5-Coder-32B-Instruct \
+    --task "..." --llm-critic
+```
+
+### Streaming interface
+
+`ReasoningSession.stream()` runs the search on a worker thread and yields
+JSON envelopes in order; the SSE server maps them 1:1 onto `EventSource`
+events. Each `/stream` connection triggers an independent run.
+
+| SSE event | Payload | Emitted |
+|-----------|---------|---------|
+| `phase` | iteration, phase, node id, detail | every state-machine transition |
+| `snapshot` | full serialized tree | at backpropagation and terminal phases |
+| `result` | outcome, iterations, node count, solution, best path | once, closing the run |
+
+The embedded page (served at `/`) renders the phase log, the live thought
+tree, and the accepted solution with zero external assets.
+
+### LangGraph embedding
+
+The native FSM-supervised controller remains the execution engine.
+`build_reasoning_graph` packages a complete run as a single LangGraph node
+(`pip install cognitivetree-ai[langgraph]`), so the framework composes into
+larger agent pipelines without re-hosting the search loop phase-by-phase —
+one source of truth for control flow, no graph-runtime overhead per phase.
 
 ## Critique-Driven Backtracking (Phase 3)
 
@@ -205,6 +267,9 @@ python -m cognitivetree.sandbox.demo
 
 # Run the critique-driven backtracking demo (fail -> critique -> revise -> succeed)
 python -m cognitivetree.feedback.demo
+
+# Serve the live streaming interface (reference scenario) at http://127.0.0.1:8732/
+python -m cognitivetree.ui.serve
 ```
 
 Docker-dependent integration tests skip automatically when the daemon or the

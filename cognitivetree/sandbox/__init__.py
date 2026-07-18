@@ -7,6 +7,7 @@ interchangeable behind it. :mod:`evaluation` bridges execution verdicts into
 the search core's ``ThoughtEvaluator`` contract.
 """
 
+from cognitivetree.sandbox.backends import docker_available, select_executor
 from cognitivetree.sandbox.docker_executor import (
     DockerSandboxConfig,
     DockerSandboxExecutor,
@@ -36,5 +37,7 @@ __all__ = [
     "ResourceLimits",
     "SandboxError",
     "SubprocessExecutor",
+    "docker_available",
     "extract_python_payload",
+    "select_executor",
 ]

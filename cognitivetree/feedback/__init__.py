@@ -9,6 +9,7 @@ Every implementation is deterministic; LLM-backed critics attach through the
 same :class:`~cognitivetree.policies.Critic` contract in Phase 4.
 """
 
+from cognitivetree.feedback.composite import ChainedCritic
 from cognitivetree.feedback.execution_critic import ExecutionTraceCritic
 from cognitivetree.feedback.revision import (
     REVISION_ATTEMPTS_KEY,
@@ -20,6 +21,7 @@ from cognitivetree.feedback.rewards import RewardShaper, RewardWeights
 
 __all__ = [
     "BoundedRevisionPolicy",
+    "ChainedCritic",
     "ExecutionTraceCritic",
     "REVISION_ATTEMPTS_KEY",
     "REVISION_NOTES_KEY",

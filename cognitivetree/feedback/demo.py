@@ -25,7 +25,8 @@ from cognitivetree.feedback.revision import (
 )
 from cognitivetree.feedback.rewards import RewardShaper
 from cognitivetree.node import ThoughtNode
-from cognitivetree.sandbox.demo import VALIDATION_HARNESS, select_executor
+from cognitivetree.sandbox.backends import select_executor
+from cognitivetree.sandbox.demo import VALIDATION_HARNESS
 from cognitivetree.sandbox.evaluation import CodeExecutionEvaluator
 from cognitivetree.search import SearchEvent, TreeSearchController
 

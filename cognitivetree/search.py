@@ -103,10 +103,22 @@ class TreeSearchController:
         self._revision_policy = revision_policy
         self._reward_model = reward_model
         self._rng = random.Random(config.seed)
+        self._active_tree: ThoughtTree | None = None
+
+    @property
+    def active_tree(self) -> ThoughtTree | None:
+        """Returns the tree of the in-progress or most recent run.
+
+        Event sinks read this property to snapshot live search state; the
+        reference is assigned before the first transition of a run, and sinks
+        execute synchronously on the run's thread, so no locking is required.
+        """
+        return self._active_tree
 
     def run(self, task: str) -> SearchResult:
         """Executes the search loop for ``task`` until a terminal phase is reached."""
         tree = ThoughtTree(task)
+        self._active_tree = tree
         machine = SearchStateMachine()
         iteration = 0
         error = ""
