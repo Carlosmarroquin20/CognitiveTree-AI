@@ -13,9 +13,9 @@ turning failure diagnoses into amended guidance for the generator.
 from __future__ import annotations
 
 import random
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, unique
-from typing import Callable, Optional
 
 from cognitivetree.config import SearchConfig
 from cognitivetree.node import NodeStatus, ThoughtNode
@@ -84,10 +84,10 @@ class TreeSearchController:
         config: SearchConfig,
         generator: ThoughtGenerator,
         evaluator: ThoughtEvaluator,
-        on_event: Optional[Callable[[SearchEvent], None]] = None,
-        critic: Optional[Critic] = None,
-        revision_policy: Optional[RevisionPolicy] = None,
-        reward_model: Optional[RewardModel] = None,
+        on_event: Callable[[SearchEvent], None] | None = None,
+        critic: Critic | None = None,
+        revision_policy: RevisionPolicy | None = None,
+        reward_model: RewardModel | None = None,
     ) -> None:
         """Wires the search loop to its policies.
 

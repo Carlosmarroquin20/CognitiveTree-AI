@@ -5,8 +5,8 @@ from dataclasses import dataclass
 from cognitivetree.config import SearchConfig
 from cognitivetree.feedback.demo import (
     BROKEN_WAVE,
-    GuidanceSensitiveGenerator,
     REVISED_CANDIDATE,
+    GuidanceSensitiveGenerator,
 )
 from cognitivetree.feedback.execution_critic import ExecutionTraceCritic
 from cognitivetree.feedback.revision import (

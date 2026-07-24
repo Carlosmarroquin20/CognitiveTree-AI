@@ -4,9 +4,10 @@ from __future__ import annotations
 
 import math
 import uuid
+from collections.abc import Iterator
 from dataclasses import dataclass, field
 from enum import Enum, unique
-from typing import Any, Iterator, Optional
+from typing import Any
 
 
 @unique
@@ -47,11 +48,11 @@ class ThoughtNode:
     """
 
     content: str
-    parent: Optional["ThoughtNode"] = None
+    parent: ThoughtNode | None = None
     depth: int = 0
     id: str = field(default_factory=_short_id)
     status: NodeStatus = NodeStatus.PENDING
-    children: list["ThoughtNode"] = field(default_factory=list)
+    children: list[ThoughtNode] = field(default_factory=list)
     visits: int = 0
     value_sum: float = 0.0
     score: float = 0.0
@@ -87,7 +88,7 @@ class ThoughtNode:
         )
         return self.mean_value + exploration
 
-    def attach_child(self, content: str) -> "ThoughtNode":
+    def attach_child(self, content: str) -> ThoughtNode:
         """Creates, links, and returns a child node one level deeper."""
         child = ThoughtNode(content=content, parent=self, depth=self.depth + 1)
         self.children.append(child)
@@ -104,17 +105,17 @@ class ThoughtNode:
         self.status = status
         self.rationale = rationale
 
-    def path_from_root(self) -> list["ThoughtNode"]:
+    def path_from_root(self) -> list[ThoughtNode]:
         """Returns the node chain from the root down to this node, inclusive."""
         path: list[ThoughtNode] = []
-        node: Optional[ThoughtNode] = self
+        node: ThoughtNode | None = self
         while node is not None:
             path.append(node)
             node = node.parent
         path.reverse()
         return path
 
-    def walk(self) -> Iterator["ThoughtNode"]:
+    def walk(self) -> Iterator[ThoughtNode]:
         """Yields this node and every descendant in depth-first order."""
         stack: list[ThoughtNode] = [self]
         while stack:

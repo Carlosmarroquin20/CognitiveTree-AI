@@ -1,5 +1,9 @@
 # CognitiveTree-AI
 
+[![CI](https://github.com/Carlosmarroquin20/CognitiveTree-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/Carlosmarroquin20/CognitiveTree-AI/actions/workflows/ci.yml)
+![Python](https://img.shields.io/badge/python-3.10%2B-blue)
+![Ruff](https://img.shields.io/badge/lint-ruff-informational)
+
 An autonomous reasoning framework that solves complex logic tasks by generating
 branching thought trees with an open-source LLM (Llama 3.3 / Qwen 2.5),
 validating intermediate code executions in a secure Docker sandbox, and
@@ -277,6 +281,28 @@ sandbox image is unavailable, so the suite stays green on any host.
 
 The demo prints the live phase trace, the final ASCII tree (`*` evaluated,
 `x` pruned, `#` accepted terminal), and the recovered solution path.
+
+## Continuous Integration
+
+Every push and pull request against `main` runs `.github/workflows/ci.yml`:
+
+| Job | Runner(s) | Verifies |
+|-----|-----------|----------|
+| `lint` | Ubuntu · 3.12 | `ruff check` at line-length 100 (`E,F,I,W,B,C4,UP,SIM`) |
+| `test` | Ubuntu · 3.10 / 3.11 / 3.12, plus Windows · 3.12 | Pure-Python suite across versions and both operating systems; Docker tests skip without a built image |
+| `integration` | Ubuntu · 3.12 | Full suite with the hardened sandbox image **built and running** and the `langgraph` extra installed |
+
+The split keeps the version matrix fast while giving the security-sensitive
+sandbox and the optional LangGraph embedding real, executed coverage once per
+run. Lint findings surface as inline PR annotations.
+
+Run the same gates locally before pushing:
+
+```bash
+python -m pip install -e ".[dev]"
+ruff check .
+python -m pytest
+```
 
 ## Design Decisions
 

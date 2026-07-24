@@ -55,4 +55,4 @@ def format_sse(envelope: dict[str, Any]) -> bytes:
     handling is required on either side.
     """
     payload = json.dumps(envelope, ensure_ascii=False, separators=(",", ":"))
-    return f"event: {envelope['type']}\ndata: {payload}\n\n".encode("utf-8")
+    return f"event: {envelope['type']}\ndata: {payload}\n\n".encode()

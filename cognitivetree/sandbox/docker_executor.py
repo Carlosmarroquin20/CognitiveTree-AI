@@ -9,6 +9,7 @@ a shell — and the container is force-removed on timeout.
 
 from __future__ import annotations
 
+import contextlib
 import subprocess
 import uuid
 from dataclasses import dataclass, field
@@ -180,15 +181,13 @@ class DockerSandboxExecutor:
 
     def _force_remove(self, name: str) -> None:
         """Removes a timed-out container, tolerating already-gone containers."""
-        try:
+        with contextlib.suppress(OSError, subprocess.TimeoutExpired):
             subprocess.run(
                 [self._config.docker_binary, "rm", "-f", name],
                 capture_output=True,
                 text=True,
                 timeout=30,
             )
-        except (OSError, subprocess.TimeoutExpired):
-            pass
 
 
 def _is_cli_fault(returncode: int, stderr: str) -> bool:

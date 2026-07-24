@@ -3,10 +3,10 @@
 import pytest
 
 from cognitivetree.state import (
+    TERMINAL_PHASES,
     InvalidTransitionError,
     SearchPhase,
     SearchStateMachine,
-    TERMINAL_PHASES,
 )
 
 

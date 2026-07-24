@@ -8,7 +8,15 @@ from cognitivetree.node import ThoughtNode
 from cognitivetree.policies import Critique, FailureClass
 from cognitivetree.sandbox.evaluation import METADATA_KEY as EXECUTION_KEY
 
-_ERROR_LINE = re.compile(r"^(?P<name>[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception|Exit|Interrupt|Warning))(?::\s*(?P<message>.*))?$")
+_ERROR_LINE = re.compile(
+    r"""
+    ^
+    (?P<name>[A-Za-z_][A-Za-z0-9_]*(?:Error|Exception|Exit|Interrupt|Warning))
+    (?::\s*(?P<message>.*))?
+    $
+    """,
+    re.VERBOSE,
+)
 
 
 class ExecutionTraceCritic:

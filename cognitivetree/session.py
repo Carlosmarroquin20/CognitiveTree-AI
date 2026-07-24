@@ -15,8 +15,8 @@ from __future__ import annotations
 
 import queue
 import threading
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
-from typing import Callable, Iterator, Optional
 
 from cognitivetree.config import SearchConfig
 from cognitivetree.feedback.composite import ChainedCritic
@@ -37,7 +37,7 @@ from cognitivetree.ui.events import (
 )
 
 EventSink = Callable[[SearchEvent], None]
-ControllerFactory = Callable[[Optional[EventSink]], TreeSearchController]
+ControllerFactory = Callable[[EventSink | None], TreeSearchController]
 
 _SNAPSHOT_PHASES = frozenset({SearchPhase.BACKPROPAGATION}) | TERMINAL_PHASES
 
@@ -118,7 +118,7 @@ def build_reference_session() -> ReasoningSession:
 
     executor, _ = select_executor()
 
-    def factory(sink: Optional[EventSink]) -> TreeSearchController:
+    def factory(sink: EventSink | None) -> TreeSearchController:
         return TreeSearchController(
             config=SearchConfig(
                 max_iterations=16, max_depth=1, branching_factor=3, seed=7
@@ -183,7 +183,7 @@ def build_llm_session(spec: LlmSessionSpec) -> ReasoningSession:
     if spec.use_llm_critic:
         critic = ChainedCritic([ExecutionTraceCritic(), LlmCritic(client)])
 
-    def factory(sink: Optional[EventSink]) -> TreeSearchController:
+    def factory(sink: EventSink | None) -> TreeSearchController:
         return TreeSearchController(
             config=spec.config,
             generator=LlmThoughtGenerator(client, temperature=spec.temperature),

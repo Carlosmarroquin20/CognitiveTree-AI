@@ -3,8 +3,9 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Callable
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING, Callable
+from typing import TYPE_CHECKING
 
 from cognitivetree.ui.events import format_sse
 from cognitivetree.ui.page import PAGE_HTML
@@ -22,7 +23,7 @@ _CLIENT_DISCONNECTS = (BrokenPipeError, ConnectionResetError, ConnectionAbortedE
 class _Handler(BaseHTTPRequestHandler):
     """Routes the two-endpoint surface: the page and the event stream."""
 
-    server: "StreamingUiServer"
+    server: StreamingUiServer
     protocol_version = "HTTP/1.1"
 
     def do_GET(self) -> None:  # noqa: N802 - fixed by http.server

@@ -13,7 +13,7 @@ Requires the optional dependency: ``pip install cognitivetree-ai[langgraph]``.
 
 from __future__ import annotations
 
-from typing import Optional, TypedDict
+from typing import TypedDict
 
 from cognitivetree.session import ControllerFactory
 
@@ -23,7 +23,7 @@ class ReasoningState(TypedDict, total=False):
 
     task: str
     outcome: str
-    solution: Optional[str]
+    solution: str | None
     iterations: int
     node_count: int
     error: str

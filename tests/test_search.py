@@ -1,6 +1,5 @@
 """End-to-end validation of the search controller against deterministic policies."""
 
-import pytest
 
 from cognitivetree.config import SearchConfig
 from cognitivetree.demo import SequencePuzzleEvaluator, SequencePuzzleGenerator
