@@ -126,6 +126,8 @@ escaping the run.
 | `cognitivetree/llm/generator.py` | `LlmThoughtGenerator`: path- and revision-aware expansion prompting |
 | `cognitivetree/llm/critic.py` | `LlmCritic`: JSON-verdict semantic critique, degrades instead of failing |
 | `cognitivetree/llm/prompts.py` | Auditable prompt templates for the LLM policies |
+| `cognitivetree/llm/scripted.py` | `ScriptedLlmClient`: deterministic backend double for offline demos and tests |
+| `cognitivetree/llm/demo.py` | Offline LLM run: real adapters driven by a scripted client, no model |
 | `cognitivetree/feedback/composite.py` | `ChainedCritic`: deterministic critic first, model critic second |
 | `cognitivetree/sandbox/backends.py` | Executor selection with TTL-cached daemon probing |
 | `cognitivetree/session.py` | `ReasoningSession` lifecycle plus reference / LLM assembly factories |
@@ -160,6 +162,37 @@ python -m cognitivetree.ui.serve --backend llm \
     --base-url http://localhost:8000/v1 --model Qwen/Qwen2.5-Coder-32B-Instruct \
     --task "..." --llm-critic
 ```
+
+### Offline harness (no model required)
+
+`ScriptedLlmClient` satisfies the `LlmClient` contract with prearranged
+completions, so the **entire** adapter stack — prompt assembly, `### CANDIDATE`
+parsing, JSON critique parsing, revision-note injection — runs through its
+production code paths without a live backend. It is the reusable test double
+and the driver for the offline demo, and it flows through the same
+`build_llm_session` assembly a real endpoint uses (injected via its `client`
+argument):
+
+```python
+from cognitivetree.llm import ScriptedLlmClient
+from cognitivetree.llm.demo import clamp_responder, build_offline_controller
+
+controller = build_offline_controller(client=ScriptedLlmClient(clamp_responder))
+result = controller.run("Implement clamp(value, low, high) correctly.")
+assert result.outcome.value == "succeeded"
+```
+
+```bash
+# Print the offline LLM run (fail -> critique -> revise -> succeed via adapters)
+python -m cognitivetree.llm.demo
+
+# Stream the LLM path in the UI with no model behind it
+python -m cognitivetree.ui.serve --backend llm-demo
+```
+
+This is what lets CI and air-gapped hosts exercise the LLM layer end-to-end,
+and it keeps the flagship "reasoning with an open-source LLM" flow demonstrable
+when no GPU or endpoint is available.
 
 ### Streaming interface
 
@@ -271,6 +304,9 @@ python -m cognitivetree.sandbox.demo
 
 # Run the critique-driven backtracking demo (fail -> critique -> revise -> succeed)
 python -m cognitivetree.feedback.demo
+
+# Run the LLM adapter stack offline via a scripted client (no model required)
+python -m cognitivetree.llm.demo
 
 # Serve the live streaming interface (reference scenario) at http://127.0.0.1:8732/
 python -m cognitivetree.ui.serve

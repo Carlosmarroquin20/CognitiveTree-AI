@@ -17,6 +17,7 @@ from cognitivetree.llm.client import (
 from cognitivetree.llm.critic import LlmCritic
 from cognitivetree.llm.generator import LlmThoughtGenerator
 from cognitivetree.llm.openai_compatible import OpenAICompatibleClient
+from cognitivetree.llm.scripted import ScriptedLlmClient
 
 __all__ = [
     "ChatMessage",
@@ -27,4 +28,5 @@ __all__ = [
     "LlmError",
     "LlmThoughtGenerator",
     "OpenAICompatibleClient",
+    "ScriptedLlmClient",
 ]

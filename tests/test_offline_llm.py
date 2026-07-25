@@ -1,0 +1,90 @@
+"""End-to-end validation of the LLM adapter stack driven offline."""
+
+from cognitivetree.config import SearchConfig
+from cognitivetree.feedback.demo import BROKEN_WAVE, REVISED_CANDIDATE
+from cognitivetree.llm.client import ChatMessage, CompletionRequest
+from cognitivetree.llm.demo import (
+    TASK,
+    build_offline_controller,
+    build_offline_session,
+    clamp_responder,
+)
+from cognitivetree.llm.prompts import CRITIC_SYSTEM_PROMPT, GENERATOR_SYSTEM_PROMPT
+from cognitivetree.llm.scripted import ScriptedLlmClient
+from cognitivetree.sandbox.demo import VALIDATION_HARNESS
+from cognitivetree.search import SearchOutcome
+from cognitivetree.session import LlmSessionSpec, build_llm_session
+
+
+def _request(system: str, user: str) -> CompletionRequest:
+    return CompletionRequest(
+        messages=(
+            ChatMessage(role="system", content=system),
+            ChatMessage(role="user", content=user),
+        )
+    )
+
+
+def test_responder_routes_by_role_and_revision_state() -> None:
+    first = clamp_responder(_request(GENERATOR_SYSTEM_PROMPT, "propose candidates"))
+    assert first.count("### CANDIDATE") == len(BROKEN_WAVE)
+
+    revised = clamp_responder(
+        _request(GENERATOR_SYSTEM_PROMPT, "REVISION NOTES\n- fix bounds")
+    )
+    assert "max(low, min(value, high))" in revised
+
+    verdict = clamp_responder(_request(CRITIC_SYSTEM_PROMPT, "diagnose"))
+    assert verdict.strip().startswith("{") and "guidance" in verdict
+
+
+def test_offline_run_completes_through_llm_adapters() -> None:
+    client = ScriptedLlmClient(clamp_responder)
+    controller = build_offline_controller(client=client)
+    result = controller.run(TASK)
+    root = result.tree.root
+
+    assert result.outcome is SearchOutcome.SUCCEEDED
+    assert result.solution == REVISED_CANDIDATE
+    assert result.iterations == 2
+    assert root.metadata["revision_attempts"] == 1
+
+    # The broken wave was proposed, executed, and critiqued before revision.
+    first_wave = [c for c in root.children if c.content in BROKEN_WAVE]
+    assert len(first_wave) == len(BROKEN_WAVE)
+    assert all(c.metadata.get("critique") for c in first_wave)
+
+    # Every completion travelled through the real generator prompt assembly.
+    assert len(client.requests) >= 2
+    assert all(
+        "expansion policy" in r.messages[0].content for r in client.requests
+    )
+    assert any("REVISION NOTES" in r.messages[-1].content for r in client.requests)
+
+
+def test_build_llm_session_accepts_injected_client() -> None:
+    spec = LlmSessionSpec(
+        task=TASK,
+        base_url="unused://offline",
+        model="scripted",
+        validation_harness=VALIDATION_HARNESS,
+        config=SearchConfig(max_iterations=16, max_depth=1, branching_factor=3, seed=7),
+    )
+    result = build_llm_session(spec, client=ScriptedLlmClient(clamp_responder)).run()
+    assert result.outcome is SearchOutcome.SUCCEEDED
+    assert result.solution == REVISED_CANDIDATE
+
+
+def test_offline_session_streams_to_completion() -> None:
+    envelopes = list(build_offline_session().stream())
+    assert envelopes[0]["type"] == "phase"
+    assert envelopes[-1]["type"] == "result"
+    assert envelopes[-1]["outcome"] == "succeeded"
+    assert "backtracking" in [e["phase"] for e in envelopes if e["type"] == "phase"]
+
+
+def test_chained_llm_critic_path_still_succeeds() -> None:
+    # The execution-trace critic resolves assertion failures, so the chained
+    # LLM critic is present but not consulted; the run must still converge.
+    result = build_offline_controller(use_llm_critic=True).run(TASK)
+    assert result.outcome is SearchOutcome.SUCCEEDED

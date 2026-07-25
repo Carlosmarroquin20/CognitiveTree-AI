@@ -23,6 +23,7 @@ from cognitivetree.feedback.composite import ChainedCritic
 from cognitivetree.feedback.execution_critic import ExecutionTraceCritic
 from cognitivetree.feedback.revision import BoundedRevisionPolicy
 from cognitivetree.feedback.rewards import RewardShaper
+from cognitivetree.llm.client import LlmClient
 from cognitivetree.llm.critic import LlmCritic
 from cognitivetree.llm.generator import LlmThoughtGenerator
 from cognitivetree.llm.openai_compatible import OpenAICompatibleClient
@@ -170,13 +171,22 @@ class LlmSessionSpec:
     revision_attempts: int = 1
 
 
-def build_llm_session(spec: LlmSessionSpec) -> ReasoningSession:
-    """Wires a session around an OpenAI-compatible model endpoint."""
+def build_llm_session(
+    spec: LlmSessionSpec, client: LlmClient | None = None
+) -> ReasoningSession:
+    """Wires a session around a chat-completion backend.
+
+    ``client`` overrides the endpoint constructed from the spec, which lets a
+    deterministic double (see :class:`~cognitivetree.llm.scripted.ScriptedLlmClient`)
+    drive the full assembly offline; ``spec.base_url`` and ``spec.model`` are
+    ignored in that case.
+    """
     from cognitivetree.sandbox.backends import select_executor
 
-    client = OpenAICompatibleClient(
-        base_url=spec.base_url, model=spec.model, api_key=spec.api_key
-    )
+    if client is None:
+        client = OpenAICompatibleClient(
+            base_url=spec.base_url, model=spec.model, api_key=spec.api_key
+        )
     executor, _ = select_executor()
 
     critic: Critic = ExecutionTraceCritic()

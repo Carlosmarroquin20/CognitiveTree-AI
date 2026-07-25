@@ -36,9 +36,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=8732, help="bind port")
     parser.add_argument(
         "--backend",
-        choices=("reference", "llm"),
+        choices=("reference", "llm-demo", "llm"),
         default="reference",
-        help="reference: deterministic demo scenario; llm: OpenAI-compatible endpoint",
+        help=(
+            "reference: deterministic demo scenario; "
+            "llm-demo: LLM adapter stack driven by a scripted client (no model); "
+            "llm: live OpenAI-compatible endpoint"
+        ),
     )
     parser.add_argument("--base-url", help="endpoint root, e.g. http://localhost:11434/v1")
     parser.add_argument("--model", help="served model identifier, e.g. llama3.3")
@@ -62,6 +66,10 @@ def session_factory_from_args(args: argparse.Namespace):
     """Builds the per-connection session factory selected by the CLI."""
     if args.backend == "reference":
         return build_reference_session
+    if args.backend == "llm-demo":
+        from cognitivetree.llm.demo import build_offline_session
+
+        return build_offline_session
     missing = [
         name
         for name, value in (
