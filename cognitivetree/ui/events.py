@@ -1,10 +1,11 @@
 """JSON envelope vocabulary and SSE framing for streamed runs.
 
-Three envelope types cover a run: ``phase`` mirrors every state-machine
+Four envelope types cover a run: ``phase`` mirrors every state-machine
 transition, ``snapshot`` carries a full serialized tree at backpropagation
-and terminal phases, and ``result`` closes the stream with the aggregated
-outcome. The envelope ``type`` doubles as the SSE event name so browser
-clients subscribe with plain ``EventSource`` listeners.
+and terminal phases, ``metrics`` reports the run summary once the search
+settles, and ``result`` closes the stream with the aggregated outcome. The
+envelope ``type`` doubles as the SSE event name so browser clients subscribe
+with plain ``EventSource`` listeners.
 """
 
 from __future__ import annotations
@@ -46,6 +47,11 @@ def result_envelope(result: SearchResult) -> dict[str, Any]:
         "best_path": [node.id for node in result.best_path],
         "ts": time.time(),
     }
+
+
+def metrics_envelope(metrics: dict[str, Any]) -> dict[str, Any]:
+    """Wraps a run-metrics summary for transport."""
+    return {"type": "metrics", "metrics": metrics, "ts": time.time()}
 
 
 def format_sse(envelope: dict[str, Any]) -> bytes:

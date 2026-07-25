@@ -133,6 +133,8 @@ escaping the run.
 | `cognitivetree/session.py` | `ReasoningSession` lifecycle plus reference / LLM assembly factories |
 | `cognitivetree/ui/` | SSE event vocabulary, threaded HTTP server, embedded single-file client, CLI |
 | `cognitivetree/integrations/langgraph_adapter.py` | Optional LangGraph embedding of full reasoning runs |
+| `cognitivetree/observability/metrics.py` | `RunMetrics` / `TokenUsage`: post-hoc run summary projected from the result |
+| `cognitivetree/observability/accounting.py` | `AccountingLlmClient`: transparent token/call tallying wrapper |
 
 ## LLM Backends and Streaming Interface (Phase 4)
 
@@ -204,10 +206,11 @@ events. Each `/stream` connection triggers an independent run.
 |-----------|---------|---------|
 | `phase` | iteration, phase, node id, detail | every state-machine transition |
 | `snapshot` | full serialized tree | at backpropagation and terminal phases |
+| `metrics` | run-metrics summary (see Observability) | once, as the search settles |
 | `result` | outcome, iterations, node count, solution, best path | once, closing the run |
 
 The embedded page (served at `/`) renders the phase log, the live thought
-tree, and the accepted solution with zero external assets.
+tree, a metrics chip row, and the accepted solution with zero external assets.
 
 ### LangGraph embedding
 
@@ -216,6 +219,42 @@ The native FSM-supervised controller remains the execution engine.
 (`pip install cognitivetree-ai[langgraph]`), so the framework composes into
 larger agent pipelines without re-hosting the search loop phase-by-phase —
 one source of truth for control flow, no graph-runtime overhead per phase.
+
+## Observability
+
+`RunMetrics.from_result(result)` projects a completed run onto a quantitative
+summary — it reads only the recorded phase history and the final tree, so
+metrics impose **no instrumentation on the search core** and can be recomputed
+on any archived result. The summary covers outcome, iterations, node-status
+counts, solution depth, structural versus revision backtracks, revisions
+granted, and per-phase wall time (derived from the transition timestamps).
+
+```python
+from cognitivetree import RunMetrics, build_reference_session
+
+result = build_reference_session().run()
+print(RunMetrics.from_result(result).format_report())
+```
+
+Token usage is captured orthogonally: `AccountingLlmClient` transparently wraps
+any `LlmClient` and tallies the prompt/completion tokens the backend reports,
+which `from_result` folds into the summary via its `token_usage` argument. The
+streaming interface emits the structural summary as a `metrics` envelope and
+renders it as a chip row; the terminal report additionally shows tokens:
+
+```bash
+python -m cognitivetree.observability.demo
+```
+```text
+run metrics
+  outcome            : succeeded
+  iterations         : 2
+  backtracks         : 0 structural, 1 revision
+  revisions granted  : 1
+  node status        : pending=1, terminal=1, pruned=3
+  phase time (ms)    : evaluation=938.0, selection=15.0
+  llm tokens         : 430 (346 prompt + 84 completion) across 2 calls
+```
 
 ## Critique-Driven Backtracking (Phase 3)
 
@@ -307,6 +346,9 @@ python -m cognitivetree.feedback.demo
 
 # Run the LLM adapter stack offline via a scripted client (no model required)
 python -m cognitivetree.llm.demo
+
+# Print a run-metrics report with token accounting (no model required)
+python -m cognitivetree.observability.demo
 
 # Serve the live streaming interface (reference scenario) at http://127.0.0.1:8732/
 python -m cognitivetree.ui.serve

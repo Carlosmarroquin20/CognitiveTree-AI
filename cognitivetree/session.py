@@ -27,11 +27,13 @@ from cognitivetree.llm.client import LlmClient
 from cognitivetree.llm.critic import LlmCritic
 from cognitivetree.llm.generator import LlmThoughtGenerator
 from cognitivetree.llm.openai_compatible import OpenAICompatibleClient
+from cognitivetree.observability.metrics import RunMetrics
 from cognitivetree.policies import Critic
 from cognitivetree.sandbox.evaluation import CodeExecutionEvaluator
 from cognitivetree.search import SearchEvent, SearchResult, TreeSearchController
 from cognitivetree.state import TERMINAL_PHASES, SearchPhase
 from cognitivetree.ui.events import (
+    metrics_envelope,
     phase_envelope,
     result_envelope,
     snapshot_envelope,
@@ -89,6 +91,8 @@ class ReasoningSession:
         def work() -> None:
             try:
                 result = controller.run(self._task)
+                metrics = RunMetrics.from_result(result)
+                envelopes.put(metrics_envelope(metrics.to_dict()))
                 envelopes.put(result_envelope(result))
             finally:
                 envelopes.put(None)

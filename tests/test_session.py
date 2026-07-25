@@ -20,7 +20,7 @@ def test_stream_envelope_ordering_and_contract() -> None:
     assert envelopes[-1]["type"] == "result"
 
     kinds = {envelope["type"] for envelope in envelopes}
-    assert kinds == {"phase", "snapshot", "result"}
+    assert kinds == {"phase", "snapshot", "metrics", "result"}
 
     result = envelopes[-1]
     assert result["outcome"] == "succeeded"
@@ -33,6 +33,15 @@ def test_stream_envelope_ordering_and_contract() -> None:
     final_tree = snapshots[-1]["tree"]
     assert final_tree["size"] == result["node_count"]
     assert final_tree["root"]["children"]
+
+    # The metrics envelope precedes the closing result and summarizes the run.
+    metrics = [e for e in envelopes if e["type"] == "metrics"]
+    assert len(metrics) == 1
+    assert envelopes[-2]["type"] == "metrics"
+    summary = metrics[0]["metrics"]
+    assert summary["outcome"] == "succeeded"
+    assert summary["revision_backtracks"] == 1
+    assert summary["nodes"] == result["node_count"]
 
     phases = [e["phase"] for e in envelopes if e["type"] == "phase"]
     assert "backtracking" in phases

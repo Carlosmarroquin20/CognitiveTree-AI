@@ -25,7 +25,7 @@ from cognitivetree.feedback.revision import (
     BoundedRevisionPolicy,
 )
 from cognitivetree.feedback.rewards import RewardShaper
-from cognitivetree.llm.client import CompletionRequest
+from cognitivetree.llm.client import CompletionRequest, LlmClient
 from cognitivetree.llm.critic import LlmCritic
 from cognitivetree.llm.generator import LlmThoughtGenerator
 from cognitivetree.llm.scripted import ScriptedLlmClient
@@ -74,12 +74,17 @@ def clamp_responder(request: CompletionRequest) -> str:
 
 
 def build_offline_controller(
-    client: ScriptedLlmClient | None = None,
+    client: LlmClient | None = None,
     on_event: Callable[[SearchEvent], None] | None = None,
     use_llm_critic: bool = False,
     seed: int = 7,
 ) -> TreeSearchController:
-    """Assembles the LLM-backed controller over a scripted client."""
+    """Assembles the LLM-backed controller over a scripted client.
+
+    ``client`` accepts any :class:`~cognitivetree.llm.client.LlmClient`, which
+    lets an :class:`~cognitivetree.observability.accounting.AccountingLlmClient`
+    wrap the scripted client to surface token usage for the run.
+    """
     client = client or ScriptedLlmClient(clamp_responder, model="scripted-llama")
     executor, _ = select_executor()
 
@@ -102,7 +107,7 @@ def build_offline_controller(
     )
 
 
-def _chained_critic(client: ScriptedLlmClient) -> Critic:
+def _chained_critic(client: LlmClient) -> Critic:
     from cognitivetree.feedback.composite import ChainedCritic
 
     return ChainedCritic([ExecutionTraceCritic(), LlmCritic(client)])

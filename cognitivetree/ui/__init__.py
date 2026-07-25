@@ -8,6 +8,7 @@ vocabulary and SSE framing, :mod:`server` hosts the HTTP endpoint pair
 
 from cognitivetree.ui.events import (
     format_sse,
+    metrics_envelope,
     phase_envelope,
     result_envelope,
     snapshot_envelope,
@@ -17,6 +18,7 @@ from cognitivetree.ui.server import StreamingUiServer
 __all__ = [
     "StreamingUiServer",
     "format_sse",
+    "metrics_envelope",
     "phase_envelope",
     "result_envelope",
     "snapshot_envelope",

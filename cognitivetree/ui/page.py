@@ -64,6 +64,12 @@ PAGE_HTML = """<!DOCTYPE html>
   footer h2 { font-size: 11px; letter-spacing: 1px; color: var(--dim2);
               text-transform: uppercase; padding: 8px 14px; }
   #solution { padding: 0 14px 14px; white-space: pre-wrap; color: var(--ok); }
+  #metrics { display: flex; flex-wrap: wrap; gap: 6px; padding: 6px 14px;
+             border-bottom: 1px solid var(--border); }
+  #metrics:empty { display: none; }
+  .chip { background: var(--panel); border: 1px solid var(--border);
+          border-radius: 4px; padding: 2px 8px; font-size: 11px; color: var(--dim2); }
+  .chip b { color: var(--text); font-weight: 600; }
 </style>
 </head>
 <body>
@@ -72,6 +78,7 @@ PAGE_HTML = """<!DOCTYPE html>
   <span id="status" class="running">connecting</span>
   <span id="meta" style="color: var(--dim2)"></span>
 </header>
+<div id="metrics"></div>
 <main>
   <section>
     <h2>Phase Log</h2>
@@ -93,6 +100,7 @@ const treeEl = document.getElementById("tree");
 const statusEl = document.getElementById("status");
 const metaEl = document.getElementById("meta");
 const solutionEl = document.getElementById("solution");
+const metricsEl = document.getElementById("metrics");
 
 const GLYPHS = { pending: "?", evaluated: "*", terminal: "#", pruned: "x", failed: "!" };
 
@@ -130,6 +138,26 @@ function renderTree(env) {
   metaEl.textContent = `${env.tree.size} nodes`;
 }
 
+function chip(label, value) {
+  return `<span class="chip">${label} <b>${value}</b></span>`;
+}
+
+function renderMetrics(m) {
+  const parts = [
+    chip("outcome", m.outcome),
+    chip("iterations", m.iterations),
+    chip("nodes", m.nodes),
+    chip("pruned", m.status_counts.pruned || 0),
+    chip("revisions", m.revisions_granted),
+    chip("backtracks", m.structural_backtracks + m.revision_backtracks),
+    chip("wall", (m.wall_time_seconds * 1000).toFixed(1) + " ms"),
+  ];
+  if (m.token_usage) {
+    parts.push(chip("tokens", m.token_usage.total_tokens));
+  }
+  metricsEl.innerHTML = parts.join("");
+}
+
 function finish(env) {
   statusEl.textContent = env.outcome;
   statusEl.className = env.outcome;
@@ -145,6 +173,7 @@ const source = new EventSource("/stream");
 source.onopen = () => { statusEl.textContent = "running"; };
 source.addEventListener("phase", e => appendLog(JSON.parse(e.data)));
 source.addEventListener("snapshot", e => renderTree(JSON.parse(e.data)));
+source.addEventListener("metrics", e => renderMetrics(JSON.parse(e.data).metrics));
 source.addEventListener("result", e => { finish(JSON.parse(e.data)); source.close(); });
 source.onerror = () => {
   if (statusEl.className === "running") {
