@@ -26,27 +26,45 @@ class SearchPhase(Enum):
     SUCCEEDED = "succeeded"
     EXHAUSTED = "exhausted"
     FAILED = "failed"
+    TIMED_OUT = "timed_out"
 
 
 TERMINAL_PHASES: frozenset[SearchPhase] = frozenset(
-    {SearchPhase.SUCCEEDED, SearchPhase.EXHAUSTED, SearchPhase.FAILED}
+    {
+        SearchPhase.SUCCEEDED,
+        SearchPhase.EXHAUSTED,
+        SearchPhase.FAILED,
+        SearchPhase.TIMED_OUT,
+    }
 )
 
+# TIMED_OUT mirrors FAILED's reachability exactly: both represent an external
+# constraint (a raised exception, a spent wall-clock budget) that can strike
+# while the machine occupies any non-terminal phase, since the controller's
+# deadline check and its exception handler both wrap the entire run.
 _TRANSITIONS: dict[SearchPhase, frozenset[SearchPhase]] = {
-    SearchPhase.IDLE: frozenset({SearchPhase.SELECTION, SearchPhase.FAILED}),
+    SearchPhase.IDLE: frozenset(
+        {SearchPhase.SELECTION, SearchPhase.FAILED, SearchPhase.TIMED_OUT}
+    ),
     SearchPhase.SELECTION: frozenset(
         {
             SearchPhase.EXPANSION,
             SearchPhase.BACKTRACKING,
             SearchPhase.EXHAUSTED,
             SearchPhase.FAILED,
+            SearchPhase.TIMED_OUT,
         }
     ),
     SearchPhase.EXPANSION: frozenset(
-        {SearchPhase.EVALUATION, SearchPhase.BACKTRACKING, SearchPhase.FAILED}
+        {
+            SearchPhase.EVALUATION,
+            SearchPhase.BACKTRACKING,
+            SearchPhase.FAILED,
+            SearchPhase.TIMED_OUT,
+        }
     ),
     SearchPhase.EVALUATION: frozenset(
-        {SearchPhase.BACKPROPAGATION, SearchPhase.FAILED}
+        {SearchPhase.BACKPROPAGATION, SearchPhase.FAILED, SearchPhase.TIMED_OUT}
     ),
     SearchPhase.BACKPROPAGATION: frozenset(
         {
@@ -54,14 +72,21 @@ _TRANSITIONS: dict[SearchPhase, frozenset[SearchPhase]] = {
             SearchPhase.SUCCEEDED,
             SearchPhase.EXHAUSTED,
             SearchPhase.FAILED,
+            SearchPhase.TIMED_OUT,
         }
     ),
     SearchPhase.BACKTRACKING: frozenset(
-        {SearchPhase.SELECTION, SearchPhase.EXHAUSTED, SearchPhase.FAILED}
+        {
+            SearchPhase.SELECTION,
+            SearchPhase.EXHAUSTED,
+            SearchPhase.FAILED,
+            SearchPhase.TIMED_OUT,
+        }
     ),
     SearchPhase.SUCCEEDED: frozenset(),
     SearchPhase.EXHAUSTED: frozenset(),
     SearchPhase.FAILED: frozenset(),
+    SearchPhase.TIMED_OUT: frozenset(),
 }
 
 

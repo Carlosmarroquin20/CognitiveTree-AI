@@ -109,13 +109,16 @@ class ReasoningSession:
         worker.join(timeout=10.0)
 
 
-def build_reference_session() -> ReasoningSession:
+def build_reference_session(max_wall_seconds: float | None = None) -> ReasoningSession:
     """Wires the deterministic reference scenario end-to-end.
 
     The scenario reuses the guidance-sensitive clamp generator, sandboxed
     validation, the execution-trace critic, and bounded revision, exercising
     every Phase 1-3 mechanism without any model dependency. It exists for
     demonstrations, UI development, and smoke verification.
+
+    ``max_wall_seconds`` threads through to the run's global time budget;
+    ``None`` (the default) leaves the search unbounded, as before.
     """
     from cognitivetree.feedback.demo import GuidanceSensitiveGenerator
     from cognitivetree.sandbox.backends import select_executor
@@ -126,7 +129,11 @@ def build_reference_session() -> ReasoningSession:
     def factory(sink: EventSink | None) -> TreeSearchController:
         return TreeSearchController(
             config=SearchConfig(
-                max_iterations=16, max_depth=1, branching_factor=3, seed=7
+                max_iterations=16,
+                max_depth=1,
+                branching_factor=3,
+                seed=7,
+                max_wall_seconds=max_wall_seconds,
             ),
             generator=GuidanceSensitiveGenerator(),
             evaluator=CodeExecutionEvaluator(

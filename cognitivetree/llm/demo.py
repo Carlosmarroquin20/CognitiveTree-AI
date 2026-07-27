@@ -78,12 +78,14 @@ def build_offline_controller(
     on_event: Callable[[SearchEvent], None] | None = None,
     use_llm_critic: bool = False,
     seed: int = 7,
+    max_wall_seconds: float | None = None,
 ) -> TreeSearchController:
     """Assembles the LLM-backed controller over a scripted client.
 
     ``client`` accepts any :class:`~cognitivetree.llm.client.LlmClient`, which
     lets an :class:`~cognitivetree.observability.accounting.AccountingLlmClient`
     wrap the scripted client to surface token usage for the run.
+    ``max_wall_seconds`` threads through to the run's global time budget.
     """
     client = client or ScriptedLlmClient(clamp_responder, model="scripted-llama")
     executor, _ = select_executor()
@@ -94,7 +96,11 @@ def build_offline_controller(
 
     return TreeSearchController(
         config=SearchConfig(
-            max_iterations=16, max_depth=1, branching_factor=len(BROKEN_WAVE), seed=seed
+            max_iterations=16,
+            max_depth=1,
+            branching_factor=len(BROKEN_WAVE),
+            seed=seed,
+            max_wall_seconds=max_wall_seconds,
         ),
         generator=LlmThoughtGenerator(client),
         evaluator=CodeExecutionEvaluator(
@@ -113,7 +119,7 @@ def _chained_critic(client: LlmClient) -> Critic:
     return ChainedCritic([ExecutionTraceCritic(), LlmCritic(client)])
 
 
-def build_offline_session():
+def build_offline_session(max_wall_seconds: float | None = None):
     """Builds a streaming session over the scripted LLM stack.
 
     The UI's ``llm-demo`` backend uses this to exercise the LLM path live
@@ -123,7 +129,9 @@ def build_offline_session():
 
     return ReasoningSession(
         task=TASK,
-        controller_factory=lambda sink: build_offline_controller(on_event=sink),
+        controller_factory=lambda sink: build_offline_controller(
+            on_event=sink, max_wall_seconds=max_wall_seconds
+        ),
     )
 
 

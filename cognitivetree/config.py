@@ -23,6 +23,16 @@ class SearchConfig:
         prune_threshold: Score below which a thought is pruned from the frontier.
         seed: Seed for the controller RNG used in tie-breaking; reserved for
             stochastic policies in later phases. ``None`` yields nondeterminism.
+        max_wall_seconds: Global wall-clock budget for the entire run. ``None``
+            (the default) disables the budget, matching every prior release.
+            The controller checks the deadline once per iteration, at the
+            boundary before expansion begins — the same granularity at which
+            ``max_iterations`` already bounds work — so it cannot preempt an
+            in-flight generator, critic, or sandboxed execution call; a single
+            slow iteration can overshoot the deadline by its own duration.
+            This budget is independent of, and typically tighter than, the
+            per-call timeouts already enforced by the sandbox executor and the
+            LLM client.
     """
 
     max_iterations: int = 64
@@ -32,6 +42,7 @@ class SearchConfig:
     accept_threshold: float = 0.95
     prune_threshold: float = 0.15
     seed: int | None = None
+    max_wall_seconds: float | None = None
 
     def __post_init__(self) -> None:
         if self.max_iterations < 1:
@@ -46,3 +57,5 @@ class SearchConfig:
             raise ValueError(
                 "thresholds must satisfy 0.0 <= prune_threshold < accept_threshold <= 1.0"
             )
+        if self.max_wall_seconds is not None and self.max_wall_seconds <= 0.0:
+            raise ValueError("max_wall_seconds must be positive when provided")

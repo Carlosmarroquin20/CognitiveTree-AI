@@ -1,5 +1,6 @@
 """End-to-end validation of the search controller against deterministic policies."""
 
+import time
 
 from cognitivetree.config import SearchConfig
 from cognitivetree.demo import SequencePuzzleEvaluator, SequencePuzzleGenerator
@@ -160,3 +161,64 @@ def test_duplicate_candidates_are_deduplicated() -> None:
         "same thought",
         "other thought",
     ]
+
+
+class SlowGenerator:
+    """Sleeps past the configured wall-clock deadline on its first call only.
+
+    A single sleep is enough: the deadline is checked once per iteration, so
+    overshooting it during iteration 1 guarantees detection at the top of
+    iteration 2, regardless of scheduling jitter on the test runner.
+    """
+
+    def __init__(self, delay_seconds: float) -> None:
+        self._delay_seconds = delay_seconds
+        self._called = False
+
+    def generate(self, node: ThoughtNode, k: int) -> list[str]:
+        if not self._called:
+            self._called = True
+            time.sleep(self._delay_seconds)
+        return [f"{node.content} thought-{i}" for i in range(k)]
+
+
+class NeverTerminalEvaluator:
+    """Scores every thought mid-range so the search never reaches SUCCEEDED.
+
+    Isolates the wall-clock budget as the sole possible cause of termination:
+    nothing here can trigger EXHAUSTED via pruning or SUCCEEDED via acceptance.
+    """
+
+    def evaluate(self, node: ThoughtNode) -> Evaluation:
+        return Evaluation(score=0.5)
+
+
+def test_wall_clock_budget_stops_a_slow_run() -> None:
+    controller = TreeSearchController(
+        config=SearchConfig(
+            max_iterations=50,
+            max_depth=50,
+            branching_factor=2,
+            max_wall_seconds=0.02,
+            seed=1,
+        ),
+        generator=SlowGenerator(delay_seconds=0.15),
+        evaluator=NeverTerminalEvaluator(),
+    )
+    result = controller.run("task")
+
+    assert result.outcome is SearchOutcome.TIMED_OUT
+    assert result.iterations == 1
+    assert result.phase_history[-1].target is SearchPhase.TIMED_OUT
+    assert "wall-clock budget" in result.phase_history[-1].note
+
+
+def test_generous_wall_clock_budget_does_not_interfere() -> None:
+    result = build_controller(max_wall_seconds=60.0).run("recover the sequence")
+
+    assert result.outcome is SearchOutcome.SUCCEEDED
+    assert result.solution == " ".join(TARGET)
+
+
+def test_wall_clock_budget_defaults_to_unbounded() -> None:
+    assert SearchConfig().max_wall_seconds is None

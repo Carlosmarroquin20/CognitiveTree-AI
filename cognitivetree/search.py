@@ -13,6 +13,7 @@ turning failure diagnoses into amended guidance for the generator.
 from __future__ import annotations
 
 import random
+import time
 from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum, unique
@@ -39,6 +40,7 @@ class SearchOutcome(Enum):
     SUCCEEDED = "succeeded"
     EXHAUSTED = "exhausted"
     FAILED = "failed"
+    TIMED_OUT = "timed_out"
 
 
 @dataclass(frozen=True, slots=True)
@@ -116,16 +118,36 @@ class TreeSearchController:
         return self._active_tree
 
     def run(self, task: str) -> SearchResult:
-        """Executes the search loop for ``task`` until a terminal phase is reached."""
+        """Executes the search loop for ``task`` until a terminal phase is reached.
+
+        When ``config.max_wall_seconds`` is set, the deadline is checked once
+        per iteration, before that iteration's expansion begins; a run that
+        exceeds it stops in the ``TIMED_OUT`` phase with the iterations
+        completed so far, rather than mid-flight through a policy call.
+        """
         tree = ThoughtTree(task)
         self._active_tree = tree
         machine = SearchStateMachine()
         iteration = 0
         error = ""
+        deadline = (
+            time.monotonic() + self._config.max_wall_seconds
+            if self._config.max_wall_seconds is not None
+            else None
+        )
 
         self._advance(machine, SearchPhase.SELECTION, iteration, None, "search started")
         try:
             while iteration < self._config.max_iterations:
+                if deadline is not None and time.monotonic() >= deadline:
+                    self._advance(
+                        machine,
+                        SearchPhase.TIMED_OUT,
+                        iteration,
+                        None,
+                        f"wall-clock budget of {self._config.max_wall_seconds:.1f}s exhausted",
+                    )
+                    break
                 iteration += 1
                 revived: list[str] = []
                 node = self._select(tree, revived)
@@ -195,8 +217,10 @@ class TreeSearchController:
             error = f"{type(exc).__name__}: {exc}"
             self._advance(machine, SearchPhase.FAILED, iteration, None, error)
 
-        # Guards against non-terminal exit when the loop breaks via budget
-        # exhaustion while the machine still sits in SELECTION.
+        # Guards against non-terminal exit when the loop breaks via iteration
+        # budget exhaustion while the machine still sits in SELECTION; a wall-
+        # clock timeout already transitions to TIMED_OUT before breaking, so
+        # this is a no-op in that case.
         if not machine.is_terminal:
             self._advance(
                 machine, SearchPhase.EXHAUSTED, iteration, None, "iteration budget spent"
@@ -346,4 +370,5 @@ _OUTCOME_BY_PHASE: dict[SearchPhase, SearchOutcome] = {
     SearchPhase.SUCCEEDED: SearchOutcome.SUCCEEDED,
     SearchPhase.EXHAUSTED: SearchOutcome.EXHAUSTED,
     SearchPhase.FAILED: SearchOutcome.FAILED,
+    SearchPhase.TIMED_OUT: SearchOutcome.TIMED_OUT,
 }

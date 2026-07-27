@@ -69,3 +69,44 @@ def test_transition_notes_are_recorded() -> None:
     machine = SearchStateMachine()
     machine.transition(SearchPhase.SELECTION, note="search started")
     assert machine.history[0].note == "search started"
+
+
+# Shortest legal transition sequence from IDLE that lands the machine in each
+# non-terminal phase, so the reachability matrix below drives only real,
+# publicly legal transitions rather than reaching into machine internals.
+_PATH_TO_PHASE: dict[SearchPhase, tuple[SearchPhase, ...]] = {
+    SearchPhase.IDLE: (),
+    SearchPhase.SELECTION: (SearchPhase.SELECTION,),
+    SearchPhase.EXPANSION: (SearchPhase.SELECTION, SearchPhase.EXPANSION),
+    SearchPhase.EVALUATION: (
+        SearchPhase.SELECTION,
+        SearchPhase.EXPANSION,
+        SearchPhase.EVALUATION,
+    ),
+    SearchPhase.BACKPROPAGATION: (
+        SearchPhase.SELECTION,
+        SearchPhase.EXPANSION,
+        SearchPhase.EVALUATION,
+        SearchPhase.BACKPROPAGATION,
+    ),
+    SearchPhase.BACKTRACKING: (SearchPhase.SELECTION, SearchPhase.BACKTRACKING),
+}
+
+
+def test_path_matrix_covers_every_non_terminal_phase() -> None:
+    assert set(_PATH_TO_PHASE) == {p for p in SearchPhase if p not in TERMINAL_PHASES}
+
+
+@pytest.mark.parametrize(
+    "phase", sorted(_PATH_TO_PHASE, key=lambda p: p.value), ids=lambda p: p.value
+)
+def test_timed_out_mirrors_failed_reachability(phase: SearchPhase) -> None:
+    # A wall-clock deadline, like a raised exception, can strike while the
+    # machine occupies any non-terminal phase; TIMED_OUT must therefore be
+    # reachable from exactly the same phases as FAILED.
+    machine = SearchStateMachine()
+    for step in _PATH_TO_PHASE[phase]:
+        machine.transition(step)
+    assert machine.phase is phase
+    assert machine.can_transition(SearchPhase.FAILED)
+    assert machine.can_transition(SearchPhase.TIMED_OUT)

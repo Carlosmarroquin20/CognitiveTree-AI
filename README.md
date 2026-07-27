@@ -74,11 +74,14 @@ stateDiagram-v2
     SUCCEEDED --> [*]
     EXHAUSTED --> [*]
     FAILED --> [*]
+    TIMED_OUT --> [*]
 ```
 
 `FAILED` is reachable from every non-terminal phase and is entered when a
 policy backend raises; the fault is captured on the `SearchResult` rather than
-escaping the run.
+escaping the run. `TIMED_OUT` mirrors that same universal reachability — it
+is entered when the optional global wall-clock budget (`SearchConfig.max_wall_seconds`)
+elapses, see **Global Time Budget** below.
 
 ### Search Cycle
 
@@ -97,6 +100,47 @@ escaping the run.
    `prune_threshold` are pruned outright.
 4. **Backpropagation** — folds each child's score into every ancestor's visit
    statistics, steering subsequent UCT descents.
+
+### Global Time Budget
+
+`SearchConfig.max_wall_seconds` caps the entire run's wall-clock duration —
+independent of, and typically tighter than, the per-execution timeouts the
+sandbox (`ResourceLimits.timeout_seconds`) and the LLM client already enforce
+on individual calls. `None` (the default) leaves the search unbounded,
+matching every prior release.
+
+The deadline is checked once per iteration, at the boundary before that
+iteration's expansion begins — the same granularity at which `max_iterations`
+already bounds work. A run that crosses the deadline stops in the new
+`TIMED_OUT` phase with exactly the iterations completed so far on
+`SearchResult.iterations`, and its cause is distinguishable in
+`phase_history` from `EXHAUSTED` (iteration budget spent) and `FAILED`
+(a policy backend raised):
+
+```python
+from cognitivetree.config import SearchConfig
+from cognitivetree.search import SearchOutcome, TreeSearchController
+
+controller = TreeSearchController(
+    config=SearchConfig(max_wall_seconds=30.0),  # stop after 30s, however far the search got
+    generator=my_generator,
+    evaluator=my_evaluator,
+)
+result = controller.run("...")
+if result.outcome is SearchOutcome.TIMED_OUT:
+    ...  # act on the best partial result via result.best_path
+```
+
+This is a cooperative, iteration-boundary check, not preemption: it cannot
+interrupt an in-flight generator, critic, or sandboxed execution call, so one
+unusually slow iteration can overshoot the deadline by its own duration.
+Preemptive cancellation was deliberately left out — forcibly killing a
+mid-flight sandboxed subprocess or Docker container from a watchdog thread
+risks leaving it in an inconsistent state, which is a correctness risk out of
+proportion to what a soft wall-clock budget needs to guarantee.
+
+The `--max-seconds` flag threads this into the streaming CLI across all three
+backends (see below).
 
 ### Module Map
 
@@ -163,7 +207,16 @@ python -m cognitivetree.ui.serve --backend llm \
 python -m cognitivetree.ui.serve --backend llm \
     --base-url http://localhost:8000/v1 --model Qwen/Qwen2.5-Coder-32B-Instruct \
     --task "..." --llm-critic
+
+# Cap the whole search at 30 seconds of wall-clock time, regardless of backend
+python -m cognitivetree.ui.serve --backend llm \
+    --base-url http://localhost:11434/v1 --model llama3.3 \
+    --task "..." --max-seconds 30
 ```
+
+`--max-seconds` maps to `SearchConfig.max_wall_seconds` and is honored by all
+three backends (`reference`, `llm-demo`, `llm`) — see **Global Time Budget**
+above.
 
 ### Offline harness (no model required)
 
@@ -227,7 +280,9 @@ summary — it reads only the recorded phase history and the final tree, so
 metrics impose **no instrumentation on the search core** and can be recomputed
 on any archived result. The summary covers outcome, iterations, node-status
 counts, solution depth, structural versus revision backtracks, revisions
-granted, and per-phase wall time (derived from the transition timestamps).
+granted, and per-phase wall time (derived from the transition timestamps) —
+the same per-phase timing that shows exactly where a `TIMED_OUT` run spent
+its budget.
 
 ```python
 from cognitivetree import RunMetrics, build_reference_session
@@ -407,3 +462,13 @@ python -m pytest
   covers the execution-grounded failure modes without model calls; an LLM
   critic implements the same `Critic` protocol in Phase 4 for semantic
   failures that leave no traceback.
+- **Cooperative deadline, not preemption** — the wall-clock budget is checked
+  once per iteration rather than by killing an in-flight call from a watchdog
+  thread. Forcibly terminating a sandboxed subprocess or Docker container
+  mid-execution risks leaving it in an inconsistent state; a soft, iteration-
+  boundary check trades a bounded overshoot for that safety, at the same
+  granularity `max_iterations` already uses.
+- **`TIMED_OUT` mirrors `FAILED`'s reachability exactly** — both represent an
+  external constraint that can strike while the machine occupies any
+  non-terminal phase, so the transition table grants them the identical set
+  of source phases; a dedicated test asserts the two sets stay equal.

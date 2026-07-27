@@ -17,6 +17,7 @@ import argparse
 import logging
 from pathlib import Path
 
+from cognitivetree.config import SearchConfig
 from cognitivetree.session import (
     LlmSessionSpec,
     ReasoningSession,
@@ -58,18 +59,30 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="chain an LLM critic behind the execution-trace critic",
     )
+    parser.add_argument(
+        "--max-seconds",
+        type=float,
+        default=None,
+        help=(
+            "global wall-clock budget for the whole search; the run stops "
+            "with outcome 'timed_out' once it elapses (default: unbounded)"
+        ),
+    )
     parser.add_argument("--verbose", action="store_true", help="debug logging")
     return parser
 
 
 def session_factory_from_args(args: argparse.Namespace):
     """Builds the per-connection session factory selected by the CLI."""
+    if args.max_seconds is not None and args.max_seconds <= 0:
+        raise SystemExit("--max-seconds must be positive")
+
     if args.backend == "reference":
-        return build_reference_session
+        return lambda: build_reference_session(max_wall_seconds=args.max_seconds)
     if args.backend == "llm-demo":
         from cognitivetree.llm.demo import build_offline_session
 
-        return build_offline_session
+        return lambda: build_offline_session(max_wall_seconds=args.max_seconds)
     missing = [
         name
         for name, value in (
@@ -91,6 +104,7 @@ def session_factory_from_args(args: argparse.Namespace):
         validation_harness=harness,
         api_key=args.api_key,
         use_llm_critic=args.llm_critic,
+        config=SearchConfig(seed=None, max_wall_seconds=args.max_seconds),
     )
 
     def factory() -> ReasoningSession:
