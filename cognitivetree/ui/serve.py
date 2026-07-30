@@ -9,6 +9,9 @@ Examples:
         --base-url http://localhost:11434/v1 --model llama3.3 \\
         --task "Implement a run-length encoder as encode(text)." \\
         --harness-file checks.py
+
+    # Re-stream a saved run archive for offline inspection
+    python -m cognitivetree.ui.serve --backend replay --archive runs/timed-out.json
 """
 
 from __future__ import annotations
@@ -37,12 +40,13 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--port", type=int, default=8732, help="bind port")
     parser.add_argument(
         "--backend",
-        choices=("reference", "llm-demo", "llm"),
+        choices=("reference", "llm-demo", "llm", "replay"),
         default="reference",
         help=(
             "reference: deterministic demo scenario; "
             "llm-demo: LLM adapter stack driven by a scripted client (no model); "
-            "llm: live OpenAI-compatible endpoint"
+            "llm: live OpenAI-compatible endpoint; "
+            "replay: re-stream a saved run archive"
         ),
     )
     parser.add_argument("--base-url", help="endpoint root, e.g. http://localhost:11434/v1")
@@ -68,6 +72,20 @@ def build_parser() -> argparse.ArgumentParser:
             "with outcome 'timed_out' once it elapses (default: unbounded)"
         ),
     )
+    parser.add_argument(
+        "--archive",
+        type=Path,
+        help="run archive to re-stream; required by the 'replay' backend",
+    )
+    parser.add_argument(
+        "--replay-speed",
+        type=float,
+        default=None,
+        help=(
+            "replay pacing factor; omit for instant replay, 1.0 to reproduce "
+            "the run's original timing, 2.0 for twice that pace"
+        ),
+    )
     parser.add_argument("--verbose", action="store_true", help="debug logging")
     return parser
 
@@ -76,6 +94,21 @@ def session_factory_from_args(args: argparse.Namespace):
     """Builds the per-connection session factory selected by the CLI."""
     if args.max_seconds is not None and args.max_seconds <= 0:
         raise SystemExit("--max-seconds must be positive")
+    if args.replay_speed is not None and args.replay_speed <= 0:
+        raise SystemExit("--replay-speed must be positive")
+
+    if args.backend == "replay":
+        from cognitivetree.persistence import ArchiveFormatError, ReplaySession, load_run
+
+        if args.archive is None:
+            raise SystemExit("backend 'replay' requires --archive")
+        try:
+            # Loading up front turns a bad path or corrupt document into an
+            # immediate startup failure instead of a broken first request.
+            archive = load_run(args.archive)
+        except (OSError, ArchiveFormatError) as exc:
+            raise SystemExit(f"cannot read archive {args.archive}: {exc}") from exc
+        return lambda: ReplaySession(archive, speed=args.replay_speed)
 
     if args.backend == "reference":
         return lambda: build_reference_session(max_wall_seconds=args.max_seconds)

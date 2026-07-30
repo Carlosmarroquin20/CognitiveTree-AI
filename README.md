@@ -179,6 +179,9 @@ backends (see below).
 | `cognitivetree/integrations/langgraph_adapter.py` | Optional LangGraph embedding of full reasoning runs |
 | `cognitivetree/observability/metrics.py` | `RunMetrics` / `TokenUsage`: post-hoc run summary projected from the result |
 | `cognitivetree/observability/accounting.py` | `AccountingLlmClient`: transparent token/call tallying wrapper |
+| `cognitivetree/persistence/archive.py` | Versioned JSON run archives: `save_run` / `load_run`, rehydrated into a real `SearchResult` |
+| `cognitivetree/persistence/replay.py` | `ReplaySession`: re-streams an archive through the live envelope vocabulary |
+| `cognitivetree/persistence/demo.py` | Archive a timed-out run, discard it, reopen and diagnose it offline |
 
 ## LLM Backends and Streaming Interface (Phase 4)
 
@@ -311,6 +314,60 @@ run metrics
   llm tokens         : 430 (346 prompt + 84 completion) across 2 calls
 ```
 
+## Run Persistence and Replay
+
+A run archive is one self-contained JSON document holding the thought tree
+**with its per-node metadata** (execution records, critiques, reward
+breakdowns), the full phase history, and the metrics summary. It exists for
+the case where a search ended somewhere you cannot debug it interactively —
+a CI runner, an air-gapped host, or behind a `TIMED_OUT` deadline.
+
+Loading an archive rehydrates a genuine `SearchResult`, not a parallel
+read-only type, so everything that works on a live run works unchanged on an
+archived one — `RunMetrics.from_result`, `tree.render()`, `best_path`:
+
+```python
+from cognitivetree import RunMetrics, load_run, save_run
+
+save_run(result, "runs/timed-out.json", metrics=RunMetrics.from_result(result).to_dict())
+
+# …later, in another process, on another machine
+archive = load_run("runs/timed-out.json")
+print(archive.result.phase_history[-1].note)   # wall-clock budget of 30s exhausted
+print(archive.result.tree.render())
+print(RunMetrics.from_result(archive.result).format_report())
+```
+
+Node metadata is serialized **opt-in** (`to_dict(include_metadata=True)`):
+archives switch it on because those payloads are exactly what offline
+diagnosis needs, while live UI snapshots — re-serialized on every
+backpropagation — leave it off and stay lean. The stored `metrics` are kept
+rather than always recomputed because token accounting originates outside the
+result and cannot be re-derived from the tree.
+
+Archives declare a `format` and `version`; unrecognized or future documents
+are refused with `ArchiveFormatError` instead of loading partially.
+
+```bash
+# Archive a budget-limited run, drop it from memory, reopen and diagnose it
+python -m cognitivetree.persistence.demo
+
+# Re-stream a saved run through the UI — same page, same envelopes, no live search
+python -m cognitivetree.ui.serve --backend replay --archive runs/timed-out.json
+
+# Replay at the run's original pace instead of instantly
+python -m cognitivetree.ui.serve --backend replay --archive runs/timed-out.json \
+    --replay-speed 1.0
+```
+
+`ReplaySession` emits the same `phase` / `snapshot` / `metrics` / `result`
+envelope sequence a live run produces — a test asserts the two sequences are
+identical — so the browser client needs no notion of replay. A bad or missing
+archive fails at server startup rather than on the first request. One honest
+limit: an archive stores only the tree's **final** state, so every replayed
+snapshot carries it; the phase log, recorded per transition, is what conveys
+how the run actually progressed.
+
 ## Critique-Driven Backtracking (Phase 3)
 
 Backtracking operates on two levels. Structural backtracking (Phase 1)
@@ -405,6 +462,9 @@ python -m cognitivetree.llm.demo
 # Print a run-metrics report with token accounting (no model required)
 python -m cognitivetree.observability.demo
 
+# Archive a timed-out run and diagnose it after reloading from disk
+python -m cognitivetree.persistence.demo
+
 # Serve the live streaming interface (reference scenario) at http://127.0.0.1:8732/
 python -m cognitivetree.ui.serve
 ```
@@ -472,3 +532,11 @@ python -m pytest
   external constraint that can strike while the machine occupies any
   non-terminal phase, so the transition table grants them the identical set
   of source phases; a dedicated test asserts the two sets stay equal.
+- **Archives rehydrate into `SearchResult`, not a read-only mirror type** —
+  reusing the live type means metrics, rendering, and path extraction need no
+  second implementation, and any future analysis tool written against live
+  runs applies to archived ones for free.
+- **Node metadata serializes opt-in** — the payloads that make offline
+  diagnosis possible are the same ones that would bloat a UI snapshot
+  re-serialized on every backpropagation, so the two callers choose
+  independently rather than sharing one compromise.

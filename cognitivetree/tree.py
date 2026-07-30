@@ -95,9 +95,29 @@ class ThoughtTree:
             node = max(live, key=lambda c: (c.mean_value, c.score, c.visits))
             path.append(node)
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serializes the full tree into a JSON-compatible snapshot."""
-        return {"size": len(self), "root": self._root.to_dict()}
+    def to_dict(self, include_metadata: bool = False) -> dict[str, Any]:
+        """Serializes the full tree into a JSON-compatible snapshot.
+
+        ``include_metadata`` is forwarded to every node; see
+        :meth:`~cognitivetree.node.ThoughtNode.to_dict`.
+        """
+        return {
+            "size": len(self),
+            "root": self._root.to_dict(include_metadata=include_metadata),
+        }
+
+    @classmethod
+    def from_dict(cls, payload: dict[str, Any]) -> ThoughtTree:
+        """Reconstructs a tree from :meth:`to_dict` output.
+
+        The identifier index is rebuilt by walking the restored structure, so
+        it stays authoritative regardless of what the serialized ``size``
+        claimed.
+        """
+        tree = cls.__new__(cls)
+        tree._root = ThoughtNode.from_dict(payload["root"])
+        tree._index = {node.id: node for node in tree._root.walk()}
+        return tree
 
     def render(self) -> str:
         """Formats the tree as an ASCII diagram for terminal inspection."""

@@ -123,9 +123,16 @@ class ThoughtNode:
             yield node
             stack.extend(reversed(node.children))
 
-    def to_dict(self) -> dict[str, Any]:
-        """Serializes the subtree into a JSON-compatible structure."""
-        return {
+    def to_dict(self, include_metadata: bool = False) -> dict[str, Any]:
+        """Serializes the subtree into a JSON-compatible structure.
+
+        ``include_metadata`` carries the per-node payloads (execution records,
+        critiques, reward breakdowns) into the output. It stays off by default
+        because live UI snapshots re-serialize the whole tree on every
+        backpropagation and have no use for them; run archives switch it on,
+        since those payloads are precisely what offline diagnosis needs.
+        """
+        payload: dict[str, Any] = {
             "id": self.id,
             "content": self.content,
             "status": self.status.value,
@@ -134,8 +141,42 @@ class ThoughtNode:
             "value_sum": round(self.value_sum, 6),
             "score": round(self.score, 6),
             "rationale": self.rationale,
-            "children": [child.to_dict() for child in self.children],
+            "children": [
+                child.to_dict(include_metadata=include_metadata)
+                for child in self.children
+            ],
         }
+        if include_metadata:
+            payload["metadata"] = self.metadata
+        return payload
+
+    @classmethod
+    def from_dict(
+        cls, payload: dict[str, Any], parent: ThoughtNode | None = None
+    ) -> ThoughtNode:
+        """Reconstructs a node and its subtree from :meth:`to_dict` output.
+
+        Parent links are re-established from the nesting rather than stored,
+        so the rebuilt subtree satisfies the same invariants the search core
+        maintains. Absent metadata is treated as empty, which keeps archives
+        written without it loadable.
+        """
+        node = cls(
+            content=payload["content"],
+            parent=parent,
+            depth=int(payload["depth"]),
+            id=payload["id"],
+            status=NodeStatus(payload["status"]),
+            visits=int(payload["visits"]),
+            value_sum=float(payload["value_sum"]),
+            score=float(payload["score"]),
+            rationale=payload.get("rationale", ""),
+            metadata=dict(payload.get("metadata") or {}),
+        )
+        node.children = [
+            cls.from_dict(child, parent=node) for child in payload.get("children", ())
+        ]
+        return node
 
     def __repr__(self) -> str:
         preview = self.content[:40] + ("..." if len(self.content) > 40 else "")

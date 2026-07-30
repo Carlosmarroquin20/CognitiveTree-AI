@@ -145,7 +145,7 @@ class TreeSearchController:
                         SearchPhase.TIMED_OUT,
                         iteration,
                         None,
-                        f"wall-clock budget of {self._config.max_wall_seconds:.1f}s exhausted",
+                        f"wall-clock budget of {self._config.max_wall_seconds:g}s exhausted",
                     )
                     break
                 iteration += 1

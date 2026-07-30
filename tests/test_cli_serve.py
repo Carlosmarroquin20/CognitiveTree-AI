@@ -7,6 +7,8 @@ search, which is fast and side-effect-free, and lets these tests assert on
 the exact ``SearchConfig`` that reached the controller.
 """
 
+from pathlib import Path
+
 import pytest
 
 from cognitivetree.ui.serve import build_parser, session_factory_from_args
@@ -90,3 +92,69 @@ class TestModelFreeBackends:
         args = parse([*backend_args, "--max-seconds", "0"])
         with pytest.raises(SystemExit, match="max-seconds"):
             session_factory_from_args(args)
+
+
+class TestReplayBackend:
+    """Wiring of the archive-replay backend."""
+
+    def archive_path(self, tmp_path: Path) -> Path:
+        from cognitivetree.llm.demo import TASK, build_offline_controller
+        from cognitivetree.persistence import save_run
+
+        return save_run(build_offline_controller().run(TASK), tmp_path / "run.json")
+
+    def test_replay_requires_an_archive(self) -> None:
+        with pytest.raises(SystemExit, match="requires --archive"):
+            session_factory_from_args(parse(["--backend", "replay"]))
+
+    def test_missing_archive_fails_at_startup(self, tmp_path: Path) -> None:
+        args = parse(
+            ["--backend", "replay", "--archive", str(tmp_path / "absent.json")]
+        )
+        with pytest.raises(SystemExit, match="cannot read archive"):
+            session_factory_from_args(args)
+
+    def test_corrupt_archive_fails_at_startup(self, tmp_path: Path) -> None:
+        broken = tmp_path / "broken.json"
+        broken.write_text('{"format": "not-ours"}', encoding="utf-8")
+        args = parse(["--backend", "replay", "--archive", str(broken)])
+        with pytest.raises(SystemExit, match="cannot read archive"):
+            session_factory_from_args(args)
+
+    def test_replay_session_streams_the_archived_run(self, tmp_path: Path) -> None:
+        args = parse(
+            ["--backend", "replay", "--archive", str(self.archive_path(tmp_path))]
+        )
+        session = session_factory_from_args(args)()
+        envelopes = list(session.stream())
+        assert envelopes[-1]["type"] == "result"
+        assert envelopes[-1]["outcome"] == "succeeded"
+
+    def test_replay_speed_reaches_the_session(self, tmp_path: Path) -> None:
+        args = parse(
+            [
+                "--backend", "replay",
+                "--archive", str(self.archive_path(tmp_path)),
+                "--replay-speed", "4.0",
+            ]
+        )
+        session = session_factory_from_args(args)()
+        assert session._speed == 4.0
+
+    def test_non_positive_replay_speed_is_rejected(self, tmp_path: Path) -> None:
+        args = parse(
+            [
+                "--backend", "replay",
+                "--archive", str(self.archive_path(tmp_path)),
+                "--replay-speed", "0",
+            ]
+        )
+        with pytest.raises(SystemExit, match="replay-speed"):
+            session_factory_from_args(args)
+
+    def test_each_connection_gets_an_independent_session(self, tmp_path: Path) -> None:
+        args = parse(
+            ["--backend", "replay", "--archive", str(self.archive_path(tmp_path))]
+        )
+        factory = session_factory_from_args(args)
+        assert factory() is not factory()
