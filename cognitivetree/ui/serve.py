@@ -73,6 +73,21 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--max-tokens",
+        type=int,
+        default=None,
+        help=(
+            "total-token ceiling for the whole search; the run stops with "
+            "outcome 'budget_exhausted' once crossed (default: unbounded)"
+        ),
+    )
+    parser.add_argument(
+        "--max-llm-calls",
+        type=int,
+        default=None,
+        help="completion-count ceiling, applied on the same terms as --max-tokens",
+    )
+    parser.add_argument(
         "--archive",
         type=Path,
         help="run archive to re-stream; required by the 'replay' backend",
@@ -96,6 +111,19 @@ def session_factory_from_args(args: argparse.Namespace):
         raise SystemExit("--max-seconds must be positive")
     if args.replay_speed is not None and args.replay_speed <= 0:
         raise SystemExit("--replay-speed must be positive")
+    if args.max_tokens is not None and args.max_tokens < 1:
+        raise SystemExit("--max-tokens must be a positive integer")
+    if args.max_llm_calls is not None and args.max_llm_calls < 1:
+        raise SystemExit("--max-llm-calls must be a positive integer")
+    if args.backend == "reference" and (
+        args.max_tokens is not None or args.max_llm_calls is not None
+    ):
+        # The reference scenario runs no model, so a consumption ceiling there
+        # would silently never fire; refusing it beats pretending it applies.
+        raise SystemExit(
+            "--max-tokens/--max-llm-calls need an LLM backend "
+            "(use --backend llm or llm-demo)"
+        )
 
     if args.backend == "replay":
         from cognitivetree.persistence import ArchiveFormatError, ReplaySession, load_run
@@ -115,7 +143,9 @@ def session_factory_from_args(args: argparse.Namespace):
     if args.backend == "llm-demo":
         from cognitivetree.llm.demo import build_offline_session
 
-        return lambda: build_offline_session(max_wall_seconds=args.max_seconds)
+        return lambda: build_offline_session(
+            max_wall_seconds=args.max_seconds, max_tokens=args.max_tokens
+        )
     missing = [
         name
         for name, value in (
@@ -138,6 +168,8 @@ def session_factory_from_args(args: argparse.Namespace):
         api_key=args.api_key,
         use_llm_critic=args.llm_critic,
         config=SearchConfig(seed=None, max_wall_seconds=args.max_seconds),
+        max_tokens=args.max_tokens,
+        max_llm_calls=args.max_llm_calls,
     )
 
     def factory() -> ReasoningSession:

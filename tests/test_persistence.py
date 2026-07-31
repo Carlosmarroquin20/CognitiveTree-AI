@@ -115,6 +115,18 @@ class TestArchiveRoundTrip:
         assert restored.solution is None
         assert "wall-clock budget" in restored.phase_history[-1].note
 
+    def test_budget_exhausted_run_round_trips_with_its_cause(
+        self, tmp_path: Path
+    ) -> None:
+        from cognitivetree.llm.demo import build_offline_controller
+
+        result = build_offline_controller(max_tokens=50).run(TASK)
+        assert result.outcome is SearchOutcome.BUDGET_EXHAUSTED
+
+        restored = load_run(save_run(result, tmp_path / "budget.json")).result
+        assert restored.outcome is SearchOutcome.BUDGET_EXHAUSTED
+        assert "token budget of 50 exhausted" in restored.phase_history[-1].note
+
     def test_phase_history_round_trips_exactly(self, solved_result, tmp_path: Path) -> None:
         path = save_run(solved_result, tmp_path / "run.json")
         restored = load_run(path).result

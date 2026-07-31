@@ -29,6 +29,8 @@ from cognitivetree.llm.client import CompletionRequest, LlmClient
 from cognitivetree.llm.critic import LlmCritic
 from cognitivetree.llm.generator import LlmThoughtGenerator
 from cognitivetree.llm.scripted import ScriptedLlmClient
+from cognitivetree.observability.accounting import AccountingLlmClient
+from cognitivetree.observability.budget import TokenBudget
 from cognitivetree.policies import Critic
 from cognitivetree.sandbox.backends import select_executor
 from cognitivetree.sandbox.demo import VALIDATION_HARNESS
@@ -79,15 +81,25 @@ def build_offline_controller(
     use_llm_critic: bool = False,
     seed: int = 7,
     max_wall_seconds: float | None = None,
+    max_tokens: int | None = None,
 ) -> TreeSearchController:
     """Assembles the LLM-backed controller over a scripted client.
 
     ``client`` accepts any :class:`~cognitivetree.llm.client.LlmClient`, which
     lets an :class:`~cognitivetree.observability.accounting.AccountingLlmClient`
     wrap the scripted client to surface token usage for the run.
-    ``max_wall_seconds`` threads through to the run's global time budget.
+    ``max_wall_seconds`` threads through to the run's global time budget, and
+    ``max_tokens`` installs a consumption ceiling — wrapping the client for
+    accounting when the caller did not already do so.
     """
     client = client or ScriptedLlmClient(clamp_responder, model="scripted-llama")
+
+    stop_condition = None
+    if max_tokens is not None:
+        if not isinstance(client, AccountingLlmClient):
+            client = AccountingLlmClient(client)
+        stop_condition = TokenBudget(client, max_total_tokens=max_tokens)
+
     executor, _ = select_executor()
 
     critic: Critic = ExecutionTraceCritic()
@@ -110,6 +122,7 @@ def build_offline_controller(
         revision_policy=BoundedRevisionPolicy(max_attempts=1),
         reward_model=RewardShaper(),
         on_event=on_event,
+        stop_condition=stop_condition,
     )
 
 
@@ -119,7 +132,9 @@ def _chained_critic(client: LlmClient) -> Critic:
     return ChainedCritic([ExecutionTraceCritic(), LlmCritic(client)])
 
 
-def build_offline_session(max_wall_seconds: float | None = None):
+def build_offline_session(
+    max_wall_seconds: float | None = None, max_tokens: int | None = None
+):
     """Builds a streaming session over the scripted LLM stack.
 
     The UI's ``llm-demo`` backend uses this to exercise the LLM path live
@@ -130,7 +145,9 @@ def build_offline_session(max_wall_seconds: float | None = None):
     return ReasoningSession(
         task=TASK,
         controller_factory=lambda sink: build_offline_controller(
-            on_event=sink, max_wall_seconds=max_wall_seconds
+            on_event=sink,
+            max_wall_seconds=max_wall_seconds,
+            max_tokens=max_tokens,
         ),
     )
 

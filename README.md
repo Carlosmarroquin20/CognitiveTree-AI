@@ -75,13 +75,17 @@ stateDiagram-v2
     EXHAUSTED --> [*]
     FAILED --> [*]
     TIMED_OUT --> [*]
+    BUDGET_EXHAUSTED --> [*]
 ```
 
-`FAILED` is reachable from every non-terminal phase and is entered when a
-policy backend raises; the fault is captured on the `SearchResult` rather than
-escaping the run. `TIMED_OUT` mirrors that same universal reachability — it
-is entered when the optional global wall-clock budget (`SearchConfig.max_wall_seconds`)
-elapses, see **Global Time Budget** below.
+Three terminal phases share one universal reachability set, because each
+represents an external constraint that can strike from any non-terminal
+phase: `FAILED` when a policy backend raises (the fault is captured on the
+`SearchResult` rather than escaping the run), `TIMED_OUT` when the global
+wall-clock budget elapses (**Global Time Budget** below), and
+`BUDGET_EXHAUSTED` when a consumption ceiling is reached (**Consumption
+Budgets** below). The last two stay distinct because they call for different
+responses: retry later versus raise the quota.
 
 ### Search Cycle
 
@@ -139,8 +143,57 @@ mid-flight sandboxed subprocess or Docker container from a watchdog thread
 risks leaving it in an inconsistent state, which is a correctness risk out of
 proportion to what a soft wall-clock budget needs to guarantee.
 
-The `--max-seconds` flag threads this into the streaming CLI across all three
+The `--max-seconds` flag threads this into the streaming CLI across all
 backends (see below).
+
+### Consumption Budgets
+
+Token spend cannot be a `SearchConfig` field the way time is. The controller
+can read a clock; it cannot read the LLM client's running tally without
+importing model-specific code across the policy boundary this package is
+built around. So consumption budgets invert the relationship through the
+`StopCondition` protocol — the caller owns the resource and reports only a
+verdict:
+
+```python
+class StopCondition(Protocol):
+    def check(self) -> str | None: ...   # a reason to stop, or None to continue
+```
+
+`TokenBudget` implements it over the same `AccountingLlmClient` used for
+metrics, so the ceiling is enforced against exactly what the backend
+reported rather than an estimate:
+
+```python
+from cognitivetree import AccountingLlmClient, TokenBudget, TreeSearchController
+
+client = AccountingLlmClient(OpenAICompatibleClient(...))
+controller = TreeSearchController(
+    config=SearchConfig(),
+    generator=LlmThoughtGenerator(client),
+    evaluator=my_evaluator,
+    stop_condition=TokenBudget(client, max_total_tokens=5000, max_calls=40),
+)
+result = controller.run("...")   # outcome may be BUDGET_EXHAUSTED
+```
+
+The condition is polled at the same iteration boundary as the deadline, and
+the deadline is tested first, so a run crossing both limits in one iteration
+reports as timed out. The same cooperative-boundary caveat applies, and it
+matters more here because it is quantifiable: **the final total can exceed
+the ceiling by roughly one iteration's consumption**, so size the ceiling
+below a hard quota rather than at it. Both ceilings are independent and
+optional; whichever is crossed first ends the run, and the reason string is
+recorded verbatim on the transition:
+
+```text
+token budget of 50 exhausted: 210 consumed across 1 calls
+```
+
+`LlmSessionSpec.max_tokens` / `max_llm_calls` and the CLI's `--max-tokens` /
+`--max-llm-calls` wire this through the session layer, wrapping the client
+for accounting automatically. The flags are refused on the `reference`
+backend, which runs no model and would silently never fire them.
 
 ### Module Map
 
@@ -179,6 +232,7 @@ backends (see below).
 | `cognitivetree/integrations/langgraph_adapter.py` | Optional LangGraph embedding of full reasoning runs |
 | `cognitivetree/observability/metrics.py` | `RunMetrics` / `TokenUsage`: post-hoc run summary projected from the result |
 | `cognitivetree/observability/accounting.py` | `AccountingLlmClient`: transparent token/call tallying wrapper |
+| `cognitivetree/observability/budget.py` | `TokenBudget`: the same tally used as a `StopCondition` |
 | `cognitivetree/persistence/archive.py` | Versioned JSON run archives: `save_run` / `load_run`, rehydrated into a real `SearchResult` |
 | `cognitivetree/persistence/replay.py` | `ReplaySession`: re-streams an archive through the live envelope vocabulary |
 | `cognitivetree/persistence/demo.py` | Archive a timed-out run, discard it, reopen and diagnose it offline |
@@ -532,6 +586,11 @@ python -m pytest
   external constraint that can strike while the machine occupies any
   non-terminal phase, so the transition table grants them the identical set
   of source phases; a dedicated test asserts the two sets stay equal.
+- **Budgets the core cannot measure invert into a protocol** — time is a
+  `SearchConfig` scalar because the controller can read a clock; token spend
+  is a `StopCondition` because reading the LLM client's tally from the search
+  core would drag model-specific code across the policy boundary. The split
+  follows what the core can observe on its own, not what looks symmetrical.
 - **Archives rehydrate into `SearchResult`, not a read-only mirror type** —
   reusing the live type means metrics, rendering, and path extraction need no
   second implementation, and any future analysis tool written against live

@@ -8,7 +8,12 @@ hosts the controller that drives the MCTS / Tree-of-Thoughts loop.
 
 from cognitivetree.config import SearchConfig
 from cognitivetree.node import NodeStatus, ThoughtNode
-from cognitivetree.observability import AccountingLlmClient, RunMetrics, TokenUsage
+from cognitivetree.observability import (
+    AccountingLlmClient,
+    RunMetrics,
+    TokenBudget,
+    TokenUsage,
+)
 from cognitivetree.persistence import (
     ArchiveFormatError,
     ReplaySession,
@@ -23,6 +28,7 @@ from cognitivetree.policies import (
     FailureClass,
     RevisionPolicy,
     RewardModel,
+    StopCondition,
     ThoughtEvaluator,
     ThoughtGenerator,
 )
@@ -71,10 +77,12 @@ __all__ = [
     "SearchPhase",
     "SearchResult",
     "SearchStateMachine",
+    "StopCondition",
     "ThoughtEvaluator",
     "ThoughtGenerator",
     "ThoughtNode",
     "ThoughtTree",
+    "TokenBudget",
     "TokenUsage",
     "TreeSearchController",
     "build_llm_session",

@@ -27,6 +27,7 @@ class SearchPhase(Enum):
     EXHAUSTED = "exhausted"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
+    BUDGET_EXHAUSTED = "budget_exhausted"
 
 
 TERMINAL_PHASES: frozenset[SearchPhase] = frozenset(
@@ -35,16 +36,25 @@ TERMINAL_PHASES: frozenset[SearchPhase] = frozenset(
         SearchPhase.EXHAUSTED,
         SearchPhase.FAILED,
         SearchPhase.TIMED_OUT,
+        SearchPhase.BUDGET_EXHAUSTED,
     }
 )
 
-# TIMED_OUT mirrors FAILED's reachability exactly: both represent an external
-# constraint (a raised exception, a spent wall-clock budget) that can strike
-# while the machine occupies any non-terminal phase, since the controller's
-# deadline check and its exception handler both wrap the entire run.
+# FAILED, TIMED_OUT, and BUDGET_EXHAUSTED share one reachability set: each
+# represents an external constraint — a raised exception, a spent wall-clock
+# deadline, a consumed resource budget — that can strike while the machine
+# occupies any non-terminal phase, since the controller's exception handler,
+# deadline check, and stop-condition poll all wrap the entire run. TIMED_OUT
+# and BUDGET_EXHAUSTED stay distinct because they call for different
+# responses: retry later versus raise the quota.
 _TRANSITIONS: dict[SearchPhase, frozenset[SearchPhase]] = {
     SearchPhase.IDLE: frozenset(
-        {SearchPhase.SELECTION, SearchPhase.FAILED, SearchPhase.TIMED_OUT}
+        {
+            SearchPhase.SELECTION,
+            SearchPhase.FAILED,
+            SearchPhase.TIMED_OUT,
+            SearchPhase.BUDGET_EXHAUSTED,
+        }
     ),
     SearchPhase.SELECTION: frozenset(
         {
@@ -53,6 +63,7 @@ _TRANSITIONS: dict[SearchPhase, frozenset[SearchPhase]] = {
             SearchPhase.EXHAUSTED,
             SearchPhase.FAILED,
             SearchPhase.TIMED_OUT,
+            SearchPhase.BUDGET_EXHAUSTED,
         }
     ),
     SearchPhase.EXPANSION: frozenset(
@@ -61,10 +72,16 @@ _TRANSITIONS: dict[SearchPhase, frozenset[SearchPhase]] = {
             SearchPhase.BACKTRACKING,
             SearchPhase.FAILED,
             SearchPhase.TIMED_OUT,
+            SearchPhase.BUDGET_EXHAUSTED,
         }
     ),
     SearchPhase.EVALUATION: frozenset(
-        {SearchPhase.BACKPROPAGATION, SearchPhase.FAILED, SearchPhase.TIMED_OUT}
+        {
+            SearchPhase.BACKPROPAGATION,
+            SearchPhase.FAILED,
+            SearchPhase.TIMED_OUT,
+            SearchPhase.BUDGET_EXHAUSTED,
+        }
     ),
     SearchPhase.BACKPROPAGATION: frozenset(
         {
@@ -73,6 +90,7 @@ _TRANSITIONS: dict[SearchPhase, frozenset[SearchPhase]] = {
             SearchPhase.EXHAUSTED,
             SearchPhase.FAILED,
             SearchPhase.TIMED_OUT,
+            SearchPhase.BUDGET_EXHAUSTED,
         }
     ),
     SearchPhase.BACKTRACKING: frozenset(
@@ -81,12 +99,14 @@ _TRANSITIONS: dict[SearchPhase, frozenset[SearchPhase]] = {
             SearchPhase.EXHAUSTED,
             SearchPhase.FAILED,
             SearchPhase.TIMED_OUT,
+            SearchPhase.BUDGET_EXHAUSTED,
         }
     ),
     SearchPhase.SUCCEEDED: frozenset(),
     SearchPhase.EXHAUSTED: frozenset(),
     SearchPhase.FAILED: frozenset(),
     SearchPhase.TIMED_OUT: frozenset(),
+    SearchPhase.BUDGET_EXHAUSTED: frozenset(),
 }
 
 

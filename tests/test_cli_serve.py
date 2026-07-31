@@ -94,6 +94,55 @@ class TestModelFreeBackends:
             session_factory_from_args(args)
 
 
+class TestTokenBudgetFlags:
+    """Wiring and validation of the consumption-ceiling flags."""
+
+    def test_defaults_are_unbounded(self) -> None:
+        args = parse([])
+        assert args.max_tokens is None
+        assert args.max_llm_calls is None
+
+    def test_ceilings_reach_the_llm_session_spec(self) -> None:
+        args = parse(
+            [
+                "--backend", "llm",
+                "--base-url", "http://localhost:11434/v1",
+                "--model", "llama3.3",
+                "--task", "do the thing",
+                "--max-tokens", "5000",
+                "--max-llm-calls", "12",
+            ]
+        )
+        session = session_factory_from_args(args)()
+        controller = session._factory(None)
+        assert controller._stop_condition is not None
+        assert controller._stop_condition._max_total_tokens == 5000
+        assert controller._stop_condition._max_calls == 12
+
+    def test_ceiling_reaches_the_offline_backend(self) -> None:
+        args = parse(["--backend", "llm-demo", "--max-tokens", "50"])
+        session = session_factory_from_args(args)()
+        controller = session._factory(None)
+        assert controller._stop_condition is not None
+        assert controller._stop_condition._max_total_tokens == 50
+
+    def test_no_stop_condition_without_a_ceiling(self) -> None:
+        args = parse(["--backend", "llm-demo"])
+        session = session_factory_from_args(args)()
+        assert session._factory(None)._stop_condition is None
+
+    @pytest.mark.parametrize("flag", ["--max-tokens", "--max-llm-calls"])
+    def test_non_positive_ceilings_are_rejected(self, flag: str) -> None:
+        args = parse(["--backend", "llm-demo", flag, "0"])
+        with pytest.raises(SystemExit, match="positive integer"):
+            session_factory_from_args(args)
+
+    def test_ceilings_are_refused_on_the_model_free_reference_backend(self) -> None:
+        args = parse(["--backend", "reference", "--max-tokens", "100"])
+        with pytest.raises(SystemExit, match="need an LLM backend"):
+            session_factory_from_args(args)
+
+
 class TestReplayBackend:
     """Wiring of the archive-replay backend."""
 

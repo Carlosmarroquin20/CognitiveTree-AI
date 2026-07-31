@@ -26,6 +26,7 @@ from cognitivetree.policies import (
     Critique,
     RevisionPolicy,
     RewardModel,
+    StopCondition,
     ThoughtEvaluator,
     ThoughtGenerator,
 )
@@ -41,6 +42,7 @@ class SearchOutcome(Enum):
     EXHAUSTED = "exhausted"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
+    BUDGET_EXHAUSTED = "budget_exhausted"
 
 
 @dataclass(frozen=True, slots=True)
@@ -90,12 +92,14 @@ class TreeSearchController:
         critic: Critic | None = None,
         revision_policy: RevisionPolicy | None = None,
         reward_model: RewardModel | None = None,
+        stop_condition: StopCondition | None = None,
     ) -> None:
         """Wires the search loop to its policies.
 
-        ``critic``, ``revision_policy``, and ``reward_model`` are optional;
-        when omitted the controller reproduces the plain Phase 1 behavior of
-        structural pruning and raw-score backpropagation.
+        ``critic``, ``revision_policy``, ``reward_model``, and
+        ``stop_condition`` are optional; when omitted the controller
+        reproduces the plain Phase 1 behavior of structural pruning and
+        raw-score backpropagation.
         """
         self._config = config
         self._generator = generator
@@ -104,6 +108,7 @@ class TreeSearchController:
         self._critic = critic
         self._revision_policy = revision_policy
         self._reward_model = reward_model
+        self._stop_condition = stop_condition
         self._rng = random.Random(config.seed)
         self._active_tree: ThoughtTree | None = None
 
@@ -120,10 +125,12 @@ class TreeSearchController:
     def run(self, task: str) -> SearchResult:
         """Executes the search loop for ``task`` until a terminal phase is reached.
 
-        When ``config.max_wall_seconds`` is set, the deadline is checked once
-        per iteration, before that iteration's expansion begins; a run that
-        exceeds it stops in the ``TIMED_OUT`` phase with the iterations
-        completed so far, rather than mid-flight through a policy call.
+        Both early-stop mechanisms are evaluated once per iteration, before
+        that iteration's expansion begins, so neither interrupts a policy call
+        mid-flight: ``config.max_wall_seconds`` stops the run in the
+        ``TIMED_OUT`` phase, and a satisfied ``stop_condition`` stops it in
+        ``BUDGET_EXHAUSTED``. The deadline is tested first, so a run that
+        crosses both limits in the same iteration is reported as timed out.
         """
         tree = ThoughtTree(task)
         self._active_tree = tree
@@ -148,6 +155,17 @@ class TreeSearchController:
                         f"wall-clock budget of {self._config.max_wall_seconds:g}s exhausted",
                     )
                     break
+                if self._stop_condition is not None:
+                    reason = self._stop_condition.check()
+                    if reason:
+                        self._advance(
+                            machine,
+                            SearchPhase.BUDGET_EXHAUSTED,
+                            iteration,
+                            None,
+                            reason,
+                        )
+                        break
                 iteration += 1
                 revived: list[str] = []
                 node = self._select(tree, revived)
@@ -371,4 +389,5 @@ _OUTCOME_BY_PHASE: dict[SearchPhase, SearchOutcome] = {
     SearchPhase.EXHAUSTED: SearchOutcome.EXHAUSTED,
     SearchPhase.FAILED: SearchOutcome.FAILED,
     SearchPhase.TIMED_OUT: SearchOutcome.TIMED_OUT,
+    SearchPhase.BUDGET_EXHAUSTED: SearchOutcome.BUDGET_EXHAUSTED,
 }

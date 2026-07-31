@@ -141,3 +141,29 @@ class RewardModel(Protocol):
     ) -> float:
         """Returns the shaped backpropagation value for ``node``."""
         ...
+
+
+@runtime_checkable
+class StopCondition(Protocol):
+    """Halts a run when a resource the search core cannot observe runs out.
+
+    ``SearchConfig`` expresses limits the controller can evaluate on its own —
+    iteration count, depth, wall-clock time. Consumption budgets cannot work
+    that way: token spend is accumulated by the LLM client, and teaching the
+    search core to read it would drag model-specific code across the policy
+    boundary this package is built around. A stop condition inverts that: the
+    caller owns the resource and reports only a verdict.
+
+    The controller polls the condition once per iteration, at the boundary
+    before expansion begins, and stops in the ``BUDGET_EXHAUSTED`` phase when
+    a reason comes back.
+    """
+
+    def check(self) -> str | None:
+        """Returns why the run must stop, or ``None`` to let it continue.
+
+        The returned reason is recorded verbatim on the phase transition, so
+        it should read as a diagnosis (``"token budget of 5000 exhausted:
+        6120 consumed"``) rather than a bare flag.
+        """
+        ...

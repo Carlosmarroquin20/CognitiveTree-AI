@@ -27,6 +27,8 @@ from cognitivetree.llm.client import LlmClient
 from cognitivetree.llm.critic import LlmCritic
 from cognitivetree.llm.generator import LlmThoughtGenerator
 from cognitivetree.llm.openai_compatible import OpenAICompatibleClient
+from cognitivetree.observability.accounting import AccountingLlmClient
+from cognitivetree.observability.budget import TokenBudget
 from cognitivetree.observability.metrics import RunMetrics
 from cognitivetree.policies import Critic
 from cognitivetree.sandbox.evaluation import CodeExecutionEvaluator
@@ -169,6 +171,10 @@ class LlmSessionSpec:
             critic for failures the traceback cannot explain.
         config: Search parameters for the run.
         revision_attempts: Revision budget per saturated node.
+        max_tokens: Total-token ceiling for the run; the search stops with
+            outcome ``budget_exhausted`` once crossed. ``None`` leaves
+            consumption unbounded.
+        max_llm_calls: Completion-count ceiling, applied on the same terms.
     """
 
     task: str
@@ -180,6 +186,8 @@ class LlmSessionSpec:
     use_llm_critic: bool = False
     config: SearchConfig = SearchConfig(seed=None)
     revision_attempts: int = 1
+    max_tokens: int | None = None
+    max_llm_calls: int | None = None
 
 
 def build_llm_session(
@@ -191,6 +199,11 @@ def build_llm_session(
     deterministic double (see :class:`~cognitivetree.llm.scripted.ScriptedLlmClient`)
     drive the full assembly offline; ``spec.base_url`` and ``spec.model`` are
     ignored in that case.
+
+    When the spec sets a consumption ceiling, the client is wrapped for
+    accounting and the resulting tally becomes the run's stop condition. An
+    already-accounting client is reused rather than double-wrapped, so its
+    caller keeps a handle on the same totals the budget enforces.
     """
     from cognitivetree.sandbox.backends import select_executor
 
@@ -198,6 +211,17 @@ def build_llm_session(
         client = OpenAICompatibleClient(
             base_url=spec.base_url, model=spec.model, api_key=spec.api_key
         )
+
+    stop_condition: TokenBudget | None = None
+    if spec.max_tokens is not None or spec.max_llm_calls is not None:
+        if not isinstance(client, AccountingLlmClient):
+            client = AccountingLlmClient(client)
+        stop_condition = TokenBudget(
+            client,
+            max_total_tokens=spec.max_tokens,
+            max_calls=spec.max_llm_calls,
+        )
+
     executor, _ = select_executor()
 
     critic: Critic = ExecutionTraceCritic()
@@ -215,6 +239,7 @@ def build_llm_session(
             revision_policy=BoundedRevisionPolicy(max_attempts=spec.revision_attempts),
             reward_model=RewardShaper(),
             on_event=sink,
+            stop_condition=stop_condition,
         )
 
     return ReasoningSession(task=spec.task, controller_factory=factory)

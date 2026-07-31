@@ -30,6 +30,7 @@ PAGE_HTML = """<!DOCTYPE html>
   #status.succeeded { color: var(--ok); }
   #status.exhausted { color: var(--warn); }
   #status.timed_out { color: var(--warn); }
+  #status.budget_exhausted { color: var(--warn); }
   #status.failed    { color: var(--bad); }
   main { flex: 1; display: grid; grid-template-columns: minmax(280px, 38%) 1fr;
          min-height: 0; }
@@ -47,7 +48,7 @@ PAGE_HTML = """<!DOCTYPE html>
   #log .backtracking    { color: var(--bad); font-weight: 600; }
   #log .succeeded       { color: var(--ok); font-weight: 600; }
   #log .exhausted, #log .failed { color: var(--bad); font-weight: 600; }
-  #log .timed_out       { color: var(--warn); font-weight: 600; }
+  #log .timed_out, #log .budget_exhausted { color: var(--warn); font-weight: 600; }
   #tree ul { list-style: none; padding-left: 18px; border-left: 1px solid var(--border); }
   #tree > ul { padding-left: 0; border-left: none; }
   #tree li { padding: 2px 0; }
