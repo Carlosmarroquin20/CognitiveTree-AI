@@ -82,6 +82,7 @@ def build_offline_controller(
     seed: int = 7,
     max_wall_seconds: float | None = None,
     max_tokens: int | None = None,
+    evaluation_workers: int = 1,
 ) -> TreeSearchController:
     """Assembles the LLM-backed controller over a scripted client.
 
@@ -113,6 +114,7 @@ def build_offline_controller(
             branching_factor=len(BROKEN_WAVE),
             seed=seed,
             max_wall_seconds=max_wall_seconds,
+            evaluation_workers=evaluation_workers,
         ),
         generator=LlmThoughtGenerator(client),
         evaluator=CodeExecutionEvaluator(
@@ -133,7 +135,9 @@ def _chained_critic(client: LlmClient) -> Critic:
 
 
 def build_offline_session(
-    max_wall_seconds: float | None = None, max_tokens: int | None = None
+    max_wall_seconds: float | None = None,
+    max_tokens: int | None = None,
+    evaluation_workers: int = 1,
 ):
     """Builds a streaming session over the scripted LLM stack.
 
@@ -148,6 +152,7 @@ def build_offline_session(
             on_event=sink,
             max_wall_seconds=max_wall_seconds,
             max_tokens=max_tokens,
+            evaluation_workers=evaluation_workers,
         ),
     )
 

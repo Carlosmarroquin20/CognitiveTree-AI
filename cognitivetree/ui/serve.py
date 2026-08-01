@@ -73,6 +73,16 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument(
+        "--eval-workers",
+        type=int,
+        default=1,
+        help=(
+            "number of candidate evaluations to run concurrently within one "
+            "expansion batch; results stay identical to a sequential run "
+            "(default: 1)"
+        ),
+    )
+    parser.add_argument(
         "--max-tokens",
         type=int,
         default=None,
@@ -115,6 +125,8 @@ def session_factory_from_args(args: argparse.Namespace):
         raise SystemExit("--max-tokens must be a positive integer")
     if args.max_llm_calls is not None and args.max_llm_calls < 1:
         raise SystemExit("--max-llm-calls must be a positive integer")
+    if args.eval_workers < 1:
+        raise SystemExit("--eval-workers must be a positive integer")
     if args.backend == "reference" and (
         args.max_tokens is not None or args.max_llm_calls is not None
     ):
@@ -139,12 +151,16 @@ def session_factory_from_args(args: argparse.Namespace):
         return lambda: ReplaySession(archive, speed=args.replay_speed)
 
     if args.backend == "reference":
-        return lambda: build_reference_session(max_wall_seconds=args.max_seconds)
+        return lambda: build_reference_session(
+            max_wall_seconds=args.max_seconds, evaluation_workers=args.eval_workers
+        )
     if args.backend == "llm-demo":
         from cognitivetree.llm.demo import build_offline_session
 
         return lambda: build_offline_session(
-            max_wall_seconds=args.max_seconds, max_tokens=args.max_tokens
+            max_wall_seconds=args.max_seconds,
+            max_tokens=args.max_tokens,
+            evaluation_workers=args.eval_workers,
         )
     missing = [
         name
@@ -167,7 +183,11 @@ def session_factory_from_args(args: argparse.Namespace):
         validation_harness=harness,
         api_key=args.api_key,
         use_llm_critic=args.llm_critic,
-        config=SearchConfig(seed=None, max_wall_seconds=args.max_seconds),
+        config=SearchConfig(
+            seed=None,
+            max_wall_seconds=args.max_seconds,
+            evaluation_workers=args.eval_workers,
+        ),
         max_tokens=args.max_tokens,
         max_llm_calls=args.max_llm_calls,
     )

@@ -33,6 +33,15 @@ class SearchConfig:
             This budget is independent of, and typically tighter than, the
             per-call timeouts already enforced by the sandbox executor and the
             LLM client.
+        evaluation_workers: Number of candidate evaluations to run
+            concurrently within one expansion batch. ``1`` (the default) keeps
+            evaluation strictly sequential, matching every prior release.
+            Raising it parallelizes the dominant cost of a run — sandboxed
+            execution — without affecting results: verdicts are always applied
+            in candidate order, so a seeded run stays bit-for-bit
+            reproducible. It is opt-in because a custom
+            :class:`~cognitivetree.policies.ThoughtEvaluator` is not required
+            to be thread-safe; the bundled sandbox evaluators are.
     """
 
     max_iterations: int = 64
@@ -43,6 +52,7 @@ class SearchConfig:
     prune_threshold: float = 0.15
     seed: int | None = None
     max_wall_seconds: float | None = None
+    evaluation_workers: int = 1
 
     def __post_init__(self) -> None:
         if self.max_iterations < 1:
@@ -59,3 +69,5 @@ class SearchConfig:
             )
         if self.max_wall_seconds is not None and self.max_wall_seconds <= 0.0:
             raise ValueError("max_wall_seconds must be positive when provided")
+        if self.evaluation_workers < 1:
+            raise ValueError("evaluation_workers must be a positive integer")

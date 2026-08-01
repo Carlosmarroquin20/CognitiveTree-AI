@@ -143,6 +143,40 @@ class TestTokenBudgetFlags:
             session_factory_from_args(args)
 
 
+class TestEvaluationWorkersFlag:
+    """Wiring and validation of the concurrency flag."""
+
+    def test_default_is_sequential(self) -> None:
+        assert parse([]).eval_workers == 1
+
+    @pytest.mark.parametrize(
+        "backend_args",
+        [["--backend", "reference"], ["--backend", "llm-demo"]],
+        ids=["reference", "llm-demo"],
+    )
+    def test_workers_reach_the_controller_config(self, backend_args: list[str]) -> None:
+        args = parse([*backend_args, "--eval-workers", "4"])
+        controller = session_factory_from_args(args)()._factory(None)
+        assert controller._config.evaluation_workers == 4
+
+    def test_workers_reach_the_llm_session_config(self) -> None:
+        args = parse(
+            [
+                "--backend", "llm",
+                "--base-url", "http://localhost:11434/v1",
+                "--model", "llama3.3",
+                "--task", "do the thing",
+                "--eval-workers", "6",
+            ]
+        )
+        controller = session_factory_from_args(args)()._factory(None)
+        assert controller._config.evaluation_workers == 6
+
+    def test_non_positive_worker_count_is_rejected(self) -> None:
+        with pytest.raises(SystemExit, match="eval-workers"):
+            session_factory_from_args(parse(["--eval-workers", "0"]))
+
+
 class TestReplayBackend:
     """Wiring of the archive-replay backend."""
 

@@ -111,7 +111,9 @@ class ReasoningSession:
         worker.join(timeout=10.0)
 
 
-def build_reference_session(max_wall_seconds: float | None = None) -> ReasoningSession:
+def build_reference_session(
+    max_wall_seconds: float | None = None, evaluation_workers: int = 1
+) -> ReasoningSession:
     """Wires the deterministic reference scenario end-to-end.
 
     The scenario reuses the guidance-sensitive clamp generator, sandboxed
@@ -136,6 +138,7 @@ def build_reference_session(max_wall_seconds: float | None = None) -> ReasoningS
                 branching_factor=3,
                 seed=7,
                 max_wall_seconds=max_wall_seconds,
+                evaluation_workers=evaluation_workers,
             ),
             generator=GuidanceSensitiveGenerator(),
             evaluator=CodeExecutionEvaluator(

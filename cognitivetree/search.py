@@ -15,6 +15,7 @@ from __future__ import annotations
 import random
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from enum import Enum, unique
 
@@ -24,6 +25,7 @@ from cognitivetree.policies import (
     CRITIQUE_METADATA_KEY,
     Critic,
     Critique,
+    Evaluation,
     RevisionPolicy,
     RewardModel,
     StopCondition,
@@ -335,8 +337,7 @@ class TreeSearchController:
         """
         solution: ThoughtNode | None = None
         valued: list[tuple[ThoughtNode, float]] = []
-        for child in children:
-            verdict = self._evaluator.evaluate(child)
+        for child, verdict in zip(children, self._collect_verdicts(children), strict=True):
             if verdict.is_terminal and verdict.score >= self._config.accept_threshold:
                 status = NodeStatus.TERMINAL
             elif verdict.is_terminal or verdict.score < self._config.prune_threshold:
@@ -359,6 +360,33 @@ class TreeSearchController:
             if status is NodeStatus.TERMINAL and solution is None:
                 solution = child
         return solution, valued
+
+    def _collect_verdicts(self, children: list[ThoughtNode]) -> list[Evaluation]:
+        """Scores every candidate, optionally concurrently, in candidate order.
+
+        Evaluation dominates the cost of a run — each verdict may spawn a
+        sandboxed container — and the candidates within one batch are
+        independent, so they parallelize cleanly. Two properties are preserved
+        regardless of worker count, which is what keeps a seeded run
+        reproducible and its failures diagnosable:
+
+        * Verdicts are returned in candidate order, never completion order, so
+          acceptance and pruning see the same sequence a sequential run would.
+        * When several candidates fail, the exception belonging to the
+          earliest candidate is the one that propagates.
+
+        Both follow from :meth:`concurrent.futures.Executor.map`, which yields
+        in submission order and re-raises at the first failing position. The
+        single-worker path stays a plain loop so default runs take on no
+        thread-pool machinery at all.
+        """
+        workers = min(self._config.evaluation_workers, len(children))
+        if workers <= 1:
+            return [self._evaluator.evaluate(child) for child in children]
+        with ThreadPoolExecutor(
+            max_workers=workers, thread_name_prefix="ctree-eval"
+        ) as pool:
+            return list(pool.map(self._evaluator.evaluate, children))
 
     def _backpropagate(self, valued: list[tuple[ThoughtNode, float]]) -> None:
         """Propagates each child's shaped value through its ancestor chain."""

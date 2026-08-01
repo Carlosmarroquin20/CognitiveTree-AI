@@ -146,6 +146,42 @@ proportion to what a soft wall-clock budget needs to guarantee.
 The `--max-seconds` flag threads this into the streaming CLI across all
 backends (see below).
 
+### Parallel Evaluation
+
+Evaluation dominates the cost of a run — the metrics report attributes
+essentially all measurable wall time to it, because each verdict may spawn a
+sandboxed container. Candidates within one expansion batch are independent,
+so `SearchConfig.evaluation_workers` evaluates them concurrently:
+
+```python
+SearchConfig(branching_factor=3, evaluation_workers=3)   # ~1.86x measured
+```
+
+Concurrency is **opt-in** (`1` by default) for one reason: a custom
+`ThoughtEvaluator` is not required to be thread-safe. The bundled sandbox
+evaluators are — each container gets a unique name, and each thread writes
+only to its own node.
+
+Two invariants hold at any worker count, which is what keeps a seeded run
+reproducible and its failures diagnosable:
+
+- **Verdicts apply in candidate order, never completion order**, so
+  acceptance, pruning, and backpropagation see exactly the sequence a
+  sequential run would.
+- **When several candidates fail, the earliest one's exception propagates**,
+  so the reported error does not depend on thread scheduling.
+
+Both follow from `Executor.map`, which yields in submission order and
+re-raises at the first failing position. A batch of one candidate skips the
+pool entirely, so the default path takes on no thread-pool machinery at all.
+The test suite proves the concurrency is real with a `threading.Barrier`
+rendezvous rather than a timing heuristic, and proves the sequential default
+does *not* overlap by asserting the same barrier breaks.
+
+Note that parallel evaluation widens the overshoot window on both budgets
+below: an iteration can now spend a whole batch of sandbox executions or LLM
+calls between two boundary checks.
+
 ### Consumption Budgets
 
 Token spend cannot be a `SearchConfig` field the way time is. The controller
@@ -586,6 +622,11 @@ python -m pytest
   external constraint that can strike while the machine occupies any
   non-terminal phase, so the transition table grants them the identical set
   of source phases; a dedicated test asserts the two sets stay equal.
+- **Concurrency is opt-in, and never observable in results** — parallel
+  evaluation applies verdicts in candidate order and propagates the earliest
+  failure, so raising the worker count changes only how long a run takes. It
+  defaults to off because third-party evaluators carry no thread-safety
+  contract.
 - **Budgets the core cannot measure invert into a protocol** — time is a
   `SearchConfig` scalar because the controller can read a clock; token spend
   is a `StopCondition` because reading the LLM client's tally from the search
