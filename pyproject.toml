@@ -16,6 +16,7 @@ langgraph = ["langgraph>=0.2"]
 
 [project.scripts]
 cognitivetree-ui = "cognitivetree.ui.serve:main"
+cognitivetree-benchmark = "cognitivetree.benchmark.run:main"
 
 [tool.setuptools.packages.find]
 include = ["cognitivetree*"]

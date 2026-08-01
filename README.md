@@ -272,6 +272,9 @@ backend, which runs no model and would silently never fire them.
 | `cognitivetree/persistence/archive.py` | Versioned JSON run archives: `save_run` / `load_run`, rehydrated into a real `SearchResult` |
 | `cognitivetree/persistence/replay.py` | `ReplaySession`: re-streams an archive through the live envelope vocabulary |
 | `cognitivetree/persistence/demo.py` | Archive a timed-out run, discard it, reopen and diagnose it offline |
+| `cognitivetree/benchmark/suite.py` | `BenchmarkTask` contract and the bundled search suite (terminal-only feedback) |
+| `cognitivetree/benchmark/runner.py` | Runner, `BenchmarkReport`, scaling curve, and head-to-head comparison |
+| `cognitivetree/benchmark/run.py` | CLI: `python -m cognitivetree.benchmark.run` |
 
 ## LLM Backends and Streaming Interface (Phase 4)
 
@@ -403,6 +406,72 @@ run metrics
   phase time (ms)    : evaluation=938.0, selection=15.0
   llm tokens         : 430 (346 prompt + 84 completion) across 2 calls
 ```
+
+## Benchmarking
+
+The framework has many tunables and no amount of reading the code reveals
+which ones pay off. `run_benchmark` executes a task suite under a
+configuration and aggregates the outcomes; `compare_reports` puts two
+configurations side by side.
+
+The headline measurement is the one a test-time compute framework lives or
+dies by — **solve rate as a function of the compute budget**:
+
+```bash
+python -m cognitivetree.benchmark.run --budgets 10 40 120
+```
+```text
+compute scaling curve
+    budget  solve rate  mean iters  wall (ms)
+        10         50%         7.8        2.9
+        40         67%        19.3        7.4
+       120        100%        28.0       11.0
+```
+
+### Why the bundled suite looks the way it does
+
+The suite is hidden-sequence recovery, but it deliberately does **not** reuse
+the graded evaluator from `cognitivetree.demo`. That evaluator scores partial
+candidates by prefix coverage, which turns the search into a gradient walk:
+every task solves in one iteration per token, and every configuration ties at
+100% — a benchmark that cannot discriminate.
+
+`TerminalOnlyEvaluator` withholds all signal until a candidate reaches full
+length. Nothing can be pruned early, the tree grows as `4 ** length`, and the
+controller has to actually search. Difficulty is then graded by target
+length, and the suite separates budgets cleanly.
+
+Two measurement details worth knowing:
+
+- **Solved-only mean iterations** is reported alongside the overall mean.
+  Unsolved runs terminate at whatever budget stopped them, so folding them
+  into one average measures the budget rather than the search.
+- **A solve requires matching `expected_solution`**, not merely a
+  `SUCCEEDED` outcome, so an evaluator that wrongly accepts cannot inflate
+  the score.
+
+### Head-to-head comparison
+
+```bash
+python -m cognitivetree.benchmark.run --budgets 120 --compare-exploration 3.0
+```
+```text
+metric             expl=1.414     expl=3   delta
+----------------------------------------------------
+solve rate               100%       100%   same
+mean iterations          28.0       28.0   same
+```
+
+That output is a real finding, not a placeholder: on this suite the UCT
+exploration weight changes nothing, because unvisited nodes already sort
+ahead of every visited one and the withheld signal leaves sibling values
+degenerate. Compute budget is what moves the needle here. A benchmark earns
+its keep by producing results like that.
+
+`--repeats N` re-runs each task with the seed offset, so an advantage that
+was really a lucky tie-break shows up as variance. `--archive-dir` writes
+every run to a JSON archive (see below), so a surprising row can be reopened
+and inspected later.
 
 ## Run Persistence and Replay
 
@@ -554,6 +623,9 @@ python -m cognitivetree.observability.demo
 
 # Archive a timed-out run and diagnose it after reloading from disk
 python -m cognitivetree.persistence.demo
+
+# Measure solve rate against compute budget on the benchmark suite
+python -m cognitivetree.benchmark.run --budgets 10 40 120
 
 # Serve the live streaming interface (reference scenario) at http://127.0.0.1:8732/
 python -m cognitivetree.ui.serve
