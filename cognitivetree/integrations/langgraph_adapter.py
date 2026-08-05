@@ -13,7 +13,7 @@ Requires the optional dependency: ``pip install cognitivetree-ai[langgraph]``.
 
 from __future__ import annotations
 
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from cognitivetree.session import ControllerFactory
 
@@ -29,8 +29,12 @@ class ReasoningState(TypedDict, total=False):
     error: str
 
 
-def build_reasoning_graph(controller_factory: ControllerFactory):
+def build_reasoning_graph(controller_factory: ControllerFactory) -> Any:
     """Compiles a one-node LangGraph that executes a full reasoning run.
+
+    The return type is deliberately ``Any``: langgraph is an optional
+    dependency imported lazily inside this function, so its compiled-graph
+    type is not available to annotate against without making it mandatory.
 
     The returned graph consumes ``{"task": ...}`` and populates the outcome
     fields of :class:`ReasoningState`. Raises ``RuntimeError`` when langgraph

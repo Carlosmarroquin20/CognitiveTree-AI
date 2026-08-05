@@ -33,6 +33,25 @@ jobs:
       - name: ruff check
         run: ruff check --output-format github .
 
+  types:
+    name: Types (mypy --strict)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: pyproject.toml
+      - name: Install package with the type-checking toolchain
+        # The package itself is installed so mypy resolves first-party
+        # imports the same way a consumer would.
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[dev]"
+      - name: mypy
+        run: mypy
+
   test:
     name: Test (${{ matrix.os }}, py${{ matrix.python-version }})
     runs-on: ${{ matrix.os }}

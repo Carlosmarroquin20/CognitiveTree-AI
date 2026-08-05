@@ -27,7 +27,7 @@ from cognitivetree.session import (
     build_llm_session,
     build_reference_session,
 )
-from cognitivetree.ui.server import StreamingUiServer
+from cognitivetree.ui.server import SessionFactory, StreamingUiServer
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -115,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-def session_factory_from_args(args: argparse.Namespace):
+def session_factory_from_args(args: argparse.Namespace) -> SessionFactory:
     """Builds the per-connection session factory selected by the CLI."""
     if args.max_seconds is not None and args.max_seconds <= 0:
         raise SystemExit("--max-seconds must be positive")

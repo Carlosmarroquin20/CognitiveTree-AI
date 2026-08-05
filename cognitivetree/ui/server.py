@@ -3,19 +3,37 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import TYPE_CHECKING
+from typing import Any, Protocol, runtime_checkable
 
 from cognitivetree.ui.events import format_sse
 from cognitivetree.ui.page import PAGE_HTML
 
-if TYPE_CHECKING:
-    from cognitivetree.session import ReasoningSession
-
 logger = logging.getLogger(__name__)
 
-SessionFactory = Callable[[], "ReasoningSession"]
+
+@runtime_checkable
+class StreamingSession(Protocol):
+    """The whole surface the server needs from whatever it is streaming.
+
+    Both a live :class:`~cognitivetree.session.ReasoningSession` and an
+    archived :class:`~cognitivetree.persistence.ReplaySession` satisfy it
+    without sharing a base class, which is what lets the same endpoint serve
+    a search in progress and one that finished hours ago.
+    """
+
+    @property
+    def task(self) -> str:
+        """Returns the task statement being streamed."""
+        ...
+
+    def stream(self) -> Iterator[dict[str, Any]]:
+        """Yields the run as an ordered sequence of envelopes."""
+        ...
+
+
+SessionFactory = Callable[[], StreamingSession]
 
 _CLIENT_DISCONNECTS = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
@@ -84,4 +102,8 @@ class StreamingUiServer(ThreadingHTTPServer):
     @property
     def url(self) -> str:
         host, port = self.server_address[:2]
+        # socketserver types the address broadly enough to cover byte-encoded
+        # families; interpolating those raw would yield a b'...' host.
+        if isinstance(host, bytes):
+            host = host.decode("utf-8")
         return f"http://{host}:{port}/"

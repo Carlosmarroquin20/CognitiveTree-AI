@@ -15,6 +15,7 @@ Run with: ``python -m cognitivetree.llm.demo``
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import TYPE_CHECKING
 
 from cognitivetree.config import SearchConfig
 from cognitivetree.feedback.demo import BROKEN_WAVE, REVISED_CANDIDATE
@@ -36,6 +37,11 @@ from cognitivetree.sandbox.backends import select_executor
 from cognitivetree.sandbox.demo import VALIDATION_HARNESS
 from cognitivetree.sandbox.evaluation import CodeExecutionEvaluator
 from cognitivetree.search import SearchEvent, TreeSearchController
+
+if TYPE_CHECKING:
+    # Imported for typing only: cognitivetree.session imports this module's
+    # siblings, so a runtime import here would close a cycle.
+    from cognitivetree.session import ReasoningSession
 
 TASK = "Implement clamp(value, low, high) correctly."
 
@@ -138,7 +144,7 @@ def build_offline_session(
     max_wall_seconds: float | None = None,
     max_tokens: int | None = None,
     evaluation_workers: int = 1,
-):
+) -> ReasoningSession:
     """Builds a streaming session over the scripted LLM stack.
 
     The UI's ``llm-demo`` backend uses this to exercise the LLM path live

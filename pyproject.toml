@@ -11,7 +11,7 @@ requires-python = ">=3.10"
 dependencies = []
 
 [project.optional-dependencies]
-dev = ["pytest>=8.0", "ruff>=0.6"]
+dev = ["pytest>=8.0", "ruff>=0.6", "mypy>=1.11"]
 langgraph = ["langgraph>=0.2"]
 
 [project.scripts]
@@ -20,6 +20,11 @@ cognitivetree-benchmark = "cognitivetree.benchmark.run:main"
 
 [tool.setuptools.packages.find]
 include = ["cognitivetree*"]
+
+# Ships the PEP 561 marker so installers of this package receive its type
+# information; without it the annotations stop at the source tree.
+[tool.setuptools.package-data]
+cognitivetree = ["py.typed"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -37,3 +42,15 @@ select = ["E", "F", "I", "W", "B", "C4", "UP", "SIM"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["cognitivetree"]
+
+[tool.mypy]
+python_version = "3.10"
+files = ["cognitivetree"]
+# The package ships py.typed, so its annotations are a promise to downstream
+# consumers; strict mode is what keeps that promise honest.
+strict = true
+
+[[tool.mypy.overrides]]
+# langgraph is an optional extra and absent from the type-check environment.
+module = ["langgraph.*"]
+ignore_missing_imports = true

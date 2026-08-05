@@ -17,6 +17,7 @@ import queue
 import threading
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from typing import Any
 
 from cognitivetree.config import SearchConfig
 from cognitivetree.feedback.composite import ChainedCritic
@@ -69,7 +70,7 @@ class ReasoningSession:
         """Executes the task synchronously without event streaming."""
         return self._factory(None).run(self._task)
 
-    def stream(self) -> Iterator[dict]:
+    def stream(self) -> Iterator[dict[str, Any]]:
         """Executes the task on a worker thread, yielding envelopes in order.
 
         The stream carries one ``phase`` envelope per state transition,
@@ -78,7 +79,7 @@ class ReasoningSession:
         thread; this generator only drains the queue, so consumers may block
         freely (as an SSE connection does) without stalling the search.
         """
-        envelopes: queue.Queue[dict | None] = queue.Queue()
+        envelopes: queue.Queue[dict[str, Any] | None] = queue.Queue()
         controller: TreeSearchController | None = None
 
         def sink(event: SearchEvent) -> None:

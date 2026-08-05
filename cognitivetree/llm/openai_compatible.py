@@ -13,7 +13,7 @@ import json
 import logging
 import urllib.error
 import urllib.request
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from cognitivetree.llm.client import (
     CompletionRequest,
@@ -31,7 +31,11 @@ class HttpJsonTransport(Protocol):
     """Posts a JSON payload and returns the raw response."""
 
     def post(
-        self, url: str, payload: dict, headers: dict[str, str], timeout: float
+        self,
+        url: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+        timeout: float,
     ) -> tuple[int, bytes]:
         """Returns ``(status_code, body)``; raises :class:`LlmError` on
         connection-level failures."""
@@ -42,7 +46,11 @@ class UrllibTransport:
     """Standard-library transport used outside of tests."""
 
     def post(
-        self, url: str, payload: dict, headers: dict[str, str], timeout: float
+        self,
+        url: str,
+        payload: dict[str, Any],
+        headers: dict[str, str],
+        timeout: float,
     ) -> tuple[int, bytes]:
         body = json.dumps(payload).encode("utf-8")
         request = urllib.request.Request(

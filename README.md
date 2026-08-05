@@ -3,6 +3,7 @@
 [![CI](https://github.com/Carlosmarroquin20/CognitiveTree-AI/actions/workflows/ci.yml/badge.svg)](https://github.com/Carlosmarroquin20/CognitiveTree-AI/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.10%2B-blue)
 ![Ruff](https://img.shields.io/badge/lint-ruff-informational)
+![Typed](https://img.shields.io/badge/mypy-strict-blue)
 
 An autonomous reasoning framework that solves complex logic tasks by generating
 branching thought trees with an open-source LLM (Llama 3.3 / Qwen 2.5),
@@ -644,6 +645,7 @@ Every push and pull request against `main` runs `.github/workflows/ci.yml`:
 | Job | Runner(s) | Verifies |
 |-----|-----------|----------|
 | `lint` | Ubuntu · 3.12 | `ruff check` at line-length 100 (`E,F,I,W,B,C4,UP,SIM`) |
+| `types` | Ubuntu · 3.12 | `mypy --strict` across all 53 modules |
 | `test` | Ubuntu · 3.10 / 3.11 / 3.12, plus Windows · 3.12 | Pure-Python suite across versions and both operating systems; Docker tests skip without a built image |
 | `integration` | Ubuntu · 3.12 | Full suite with the hardened sandbox image **built and running** and the `langgraph` extra installed |
 
@@ -656,8 +658,25 @@ Run the same gates locally before pushing:
 ```bash
 python -m pip install -e ".[dev]"
 ruff check .
+mypy
 python -m pytest
 ```
+
+### Typing
+
+The package ships a PEP 561 `py.typed` marker, so consumers receive its
+annotations instead of silently falling back to `Any`. That marker is a
+promise, and `mypy --strict` in CI is what keeps it honest — settings live in
+`pyproject.toml`, so `mypy` with no arguments reproduces the CI gate exactly.
+
+Adopting strict mode surfaced one genuine defect rather than only missing
+annotations: `StreamingUiServer.url` interpolated `server_address` directly,
+which renders as `b'127.0.0.1'` for the byte-encoded address families
+`socketserver` permits. It also forced an honest answer to a design question
+the code had left implicit — the server accepts both a live `ReasoningSession`
+and an archived `ReplaySession`, which share no base class, so that duck
+typing is now stated as the `StreamingSession` protocol the server actually
+requires.
 
 ## Design Decisions
 

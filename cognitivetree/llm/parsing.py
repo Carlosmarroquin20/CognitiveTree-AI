@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+from typing import Any
 
 CANDIDATE_MARKER = "### CANDIDATE"
 
@@ -46,7 +47,7 @@ def _cleaned(parts: list[str]) -> list[str]:
     return [part.strip() for part in parts if part.strip()]
 
 
-def extract_json_object(text: str) -> dict | None:
+def extract_json_object(text: str) -> dict[str, Any] | None:
     """Returns the first balanced JSON object found in ``text``, or ``None``.
 
     The scanner tolerates surrounding prose and code fences, which model

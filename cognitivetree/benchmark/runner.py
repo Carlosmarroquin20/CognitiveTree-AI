@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import time
 from collections import Counter
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any
@@ -264,7 +264,7 @@ def _seeded(config: SearchConfig, repeat: int) -> SearchConfig:
     return replace(config, seed=config.seed + repeat)
 
 
-def _mean(values) -> float:
+def _mean(values: Iterable[float]) -> float:
     collected = list(values)
     return sum(collected) / len(collected) if collected else 0.0
 
