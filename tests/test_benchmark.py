@@ -295,6 +295,20 @@ class TestCli:
         assert "head-to-head" in out
         assert "expl=1.414" in out and "expl=3" in out
 
+    def test_detail_mode_prints_the_per_task_table(self, capsys) -> None:
+        main(["--budgets", "10", "--detail"])
+        out = capsys.readouterr().out
+        assert "benchmark: budget=10" in out
+        assert "solve rate" in out
+
+    def test_archive_dir_writes_one_file_per_run(
+        self, tmp_path: Path, capsys
+    ) -> None:
+        main(["--budgets", "10", "--archive-dir", str(tmp_path)])
+        out = capsys.readouterr().out
+        assert "archives written to" in out
+        assert len(list(tmp_path.glob("*.json"))) == len(default_suite())
+
     def test_json_export(self, tmp_path: Path, capsys) -> None:
         destination = tmp_path / "nested" / "reports.json"
         main(["--budgets", "10", "--json", str(destination)])

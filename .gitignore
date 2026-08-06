@@ -56,3 +56,9 @@ Desktop.ini
 
 # Claude Code local settings
 .claude/settings.local.json
+
+# Working context for Claude Code. Kept local by preference; the usual
+# convention is to commit CLAUDE.md so the guidance follows the repository,
+# in which case delete the line below.
+CLAUDE.md
+CLAUDE.local.md

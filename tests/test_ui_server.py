@@ -83,3 +83,20 @@ def test_stream_delivers_full_run_over_http() -> None:
         assert "snapshot" in names
         assert names[-1] == "result"
         assert events[-1][1]["outcome"] == "succeeded"
+
+
+def test_client_disconnect_mid_stream_leaves_the_server_healthy() -> None:
+    # A browser closing the tab mid-run must not take the handler thread with
+    # it; the server has to keep answering afterwards.
+    with LiveServer() as live:
+        aborted = http.client.HTTPConnection("127.0.0.1", live.port, timeout=60)
+        aborted.request("GET", "/stream")
+        response = aborted.getresponse()
+        assert response.status == 200
+        response.readline()
+        aborted.close()
+
+        survivor = http.client.HTTPConnection("127.0.0.1", live.port, timeout=60)
+        survivor.request("GET", "/")
+        assert survivor.getresponse().status == 200
+        survivor.close()
