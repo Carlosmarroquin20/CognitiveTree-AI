@@ -16,6 +16,18 @@ _STATUS_GLYPHS: dict[NodeStatus, str] = {
 }
 
 
+def _format_label(node: ThoughtNode) -> str:
+    """Renders one node's single-line summary for the ASCII diagram."""
+    glyph = _STATUS_GLYPHS[node.status]
+    content = node.content if node.content else "<root>"
+    if len(content) > 60:
+        content = content[:57] + "..."
+    return (
+        f"[{glyph}] d={node.depth} v={node.visits} "
+        f"s={node.score:.2f} q={node.mean_value:.2f} | {content}"
+    )
+
+
 class ThoughtTree:
     """Owns the thought tree rooted at the task statement.
 
@@ -120,37 +132,28 @@ class ThoughtTree:
         return tree
 
     def render(self) -> str:
-        """Formats the tree as an ASCII diagram for terminal inspection."""
-        lines: list[str] = []
-        self._render_node(self._root, prefix="", is_last=True, lines=lines)
-        return "\n".join(lines)
+        """Formats the tree as an ASCII diagram for terminal inspection.
 
-    def _render_node(
-        self,
-        node: ThoughtNode,
-        prefix: str,
-        is_last: bool,
-        lines: list[str],
-    ) -> None:
-        glyph = _STATUS_GLYPHS[node.status]
-        content = node.content if node.content else "<root>"
-        if len(content) > 60:
-            content = content[:57] + "..."
-        label = (
-            f"[{glyph}] d={node.depth} v={node.visits} "
-            f"s={node.score:.2f} q={node.mean_value:.2f} | {content}"
-        )
-        if node.is_root:
-            lines.append(label)
-            child_prefix = ""
-        else:
-            connector = "`-- " if is_last else "|-- "
-            lines.append(f"{prefix}{connector}{label}")
-            child_prefix = prefix + ("    " if is_last else "|   ")
-        for index, child in enumerate(node.children):
-            self._render_node(
-                child,
-                prefix=child_prefix,
-                is_last=index == len(node.children) - 1,
-                lines=lines,
-            )
+        Iterative for the same reason serialization is: deep chains would
+        otherwise exhaust the interpreter's frame budget. Children are pushed
+        in reverse so the stack pops them left to right, preserving the exact
+        ordering a depth-first walk produces.
+        """
+        lines: list[str] = []
+        pending: list[tuple[ThoughtNode, str, bool]] = [(self._root, "", True)]
+        while pending:
+            node, prefix, is_last = pending.pop()
+            label = _format_label(node)
+            if node.is_root:
+                lines.append(label)
+                child_prefix = ""
+            else:
+                connector = "`-- " if is_last else "|-- "
+                lines.append(f"{prefix}{connector}{label}")
+                child_prefix = prefix + ("    " if is_last else "|   ")
+            last_index = len(node.children) - 1
+            for index in range(last_index, -1, -1):
+                pending.append(
+                    (node.children[index], child_prefix, index == last_index)
+                )
+        return "\n".join(lines)

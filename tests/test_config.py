@@ -1,8 +1,11 @@
 """Validates SearchConfig field constraints, including the wall-clock budget."""
 
+import json
+
 import pytest
 
-from cognitivetree.config import SearchConfig
+from cognitivetree.config import MAX_SUPPORTED_DEPTH, SearchConfig
+from cognitivetree.tree import ThoughtTree
 
 
 def test_defaults_are_unbounded_in_wall_time() -> None:
@@ -17,6 +20,26 @@ def test_accepts_a_positive_wall_clock_budget() -> None:
 def test_rejects_non_positive_wall_clock_budget(value: float) -> None:
     with pytest.raises(ValueError, match="max_wall_seconds"):
         SearchConfig(max_wall_seconds=value)
+
+
+def test_depth_is_capped_at_the_serializable_limit() -> None:
+    assert SearchConfig(max_depth=MAX_SUPPORTED_DEPTH).max_depth == MAX_SUPPORTED_DEPTH
+    with pytest.raises(ValueError, match="cannot be serialized"):
+        SearchConfig(max_depth=MAX_SUPPORTED_DEPTH + 1)
+
+
+def test_the_cap_keeps_every_reachable_run_serializable() -> None:
+    # The guard exists to guarantee this: a tree at the deepest permitted
+    # configuration must still survive json.dumps, which encodes the nested
+    # payload recursively.
+    tree = ThoughtTree("root")
+    node = tree.root
+    for index in range(MAX_SUPPORTED_DEPTH):
+        node = tree.add_child(node, f"step-{index}")
+
+    encoded = json.dumps(tree.to_dict(include_metadata=True))
+    assert len(encoded) > 0
+    assert ThoughtTree.from_dict(json.loads(encoded)).root.content == "root"
 
 
 @pytest.mark.parametrize(

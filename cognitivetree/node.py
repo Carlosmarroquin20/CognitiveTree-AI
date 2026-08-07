@@ -131,24 +131,31 @@ class ThoughtNode:
         because live UI snapshots re-serialize the whole tree on every
         backpropagation and have no use for them; run archives switch it on,
         since those payloads are precisely what offline diagnosis needs.
+
+        The traversal is iterative because ``max_depth`` admits chains far
+        deeper than the interpreter's frame limit; a recursive walk raised
+        ``RecursionError`` beyond roughly 500 levels and took UI snapshots,
+        archiving, and rendering down with it. Reversing the depth-first
+        order visits every child before its parent, so each payload can embed
+        the ones already built.
         """
-        payload: dict[str, Any] = {
-            "id": self.id,
-            "content": self.content,
-            "status": self.status.value,
-            "depth": self.depth,
-            "visits": self.visits,
-            "value_sum": round(self.value_sum, 6),
-            "score": round(self.score, 6),
-            "rationale": self.rationale,
-            "children": [
-                child.to_dict(include_metadata=include_metadata)
-                for child in self.children
-            ],
-        }
-        if include_metadata:
-            payload["metadata"] = self.metadata
-        return payload
+        payloads: dict[int, dict[str, Any]] = {}
+        for node in reversed(list(self.walk())):
+            payload: dict[str, Any] = {
+                "id": node.id,
+                "content": node.content,
+                "status": node.status.value,
+                "depth": node.depth,
+                "visits": node.visits,
+                "value_sum": round(node.value_sum, 6),
+                "score": round(node.score, 6),
+                "rationale": node.rationale,
+                "children": [payloads[id(child)] for child in node.children],
+            }
+            if include_metadata:
+                payload["metadata"] = node.metadata
+            payloads[id(node)] = payload
+        return payloads[id(self)]
 
     @classmethod
     def from_dict(
@@ -159,9 +166,25 @@ class ThoughtNode:
         Parent links are re-established from the nesting rather than stored,
         so the rebuilt subtree satisfies the same invariants the search core
         maintains. Absent metadata is treated as empty, which keeps archives
-        written without it loadable.
+        written without it loadable. The rebuild is iterative for the same
+        reason the serializer is.
         """
-        node = cls(
+        root = cls._bare_from_payload(payload, parent)
+        pending: list[tuple[ThoughtNode, dict[str, Any]]] = [(root, payload)]
+        while pending:
+            node, data = pending.pop()
+            for child_payload in data.get("children", ()):
+                child = cls._bare_from_payload(child_payload, node)
+                node.children.append(child)
+                pending.append((child, child_payload))
+        return root
+
+    @classmethod
+    def _bare_from_payload(
+        cls, payload: dict[str, Any], parent: ThoughtNode | None
+    ) -> ThoughtNode:
+        """Rebuilds one node, leaving its children for the caller to attach."""
+        return cls(
             content=payload["content"],
             parent=parent,
             depth=int(payload["depth"]),
@@ -173,10 +196,6 @@ class ThoughtNode:
             rationale=payload.get("rationale", ""),
             metadata=dict(payload.get("metadata") or {}),
         )
-        node.children = [
-            cls.from_dict(child, parent=node) for child in payload.get("children", ())
-        ]
-        return node
 
     def __repr__(self) -> str:
         preview = self.content[:40] + ("..." if len(self.content) > 40 else "")

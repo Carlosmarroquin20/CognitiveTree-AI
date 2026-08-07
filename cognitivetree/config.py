@@ -4,6 +4,15 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+# A serialized tree nests one JSON object per level, and ``json.dumps``
+# encodes that nesting recursively: past roughly 496 levels it raises
+# RecursionError, which would strand a finished run — unable to be archived,
+# streamed to the UI, or replayed. The cap sits far below that cliff and far
+# above any plausible reasoning chain (the default depth is 8), so the failure
+# surfaces at construction with an actionable message instead of after the
+# search has already spent its budget.
+MAX_SUPPORTED_DEPTH = 256
+
 
 @dataclass(frozen=True, slots=True)
 class SearchConfig:
@@ -15,6 +24,8 @@ class SearchConfig:
     Attributes:
         max_iterations: Upper bound on select-expand-evaluate-backpropagate cycles.
         max_depth: Maximum node depth; nodes at this depth are never expanded.
+            Capped at :data:`MAX_SUPPORTED_DEPTH` so every reachable run stays
+            serializable — see the note on that constant.
         branching_factor: Number of candidate thoughts requested per expansion.
         exploration_weight: UCT exploration coefficient; higher values favor
             less-visited branches over exploitation of high-value ones.
@@ -59,6 +70,11 @@ class SearchConfig:
             raise ValueError("max_iterations must be a positive integer")
         if self.max_depth < 1:
             raise ValueError("max_depth must be a positive integer")
+        if self.max_depth > MAX_SUPPORTED_DEPTH:
+            raise ValueError(
+                f"max_depth must not exceed {MAX_SUPPORTED_DEPTH}; deeper trees "
+                "cannot be serialized to JSON for archiving or streaming"
+            )
         if self.branching_factor < 1:
             raise ValueError("branching_factor must be a positive integer")
         if self.exploration_weight < 0.0:

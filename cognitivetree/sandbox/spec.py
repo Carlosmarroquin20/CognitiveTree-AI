@@ -39,6 +39,15 @@ class ResourceLimits:
         timeout_seconds: Wall-clock deadline before the payload is killed.
         output_limit_chars: Per-stream cap on captured stdout / stderr;
             oversized output is clipped and flagged, never propagated whole.
+
+    Known limitation: ``output_limit_chars`` bounds what re-enters the
+    framework, not what the payload may emit. Both executors buffer a run's
+    full output before clipping, so a payload printing gigabytes consumes that
+    much host memory first. The container's ``--memory`` cap does not cover
+    this, since the buffering happens in the client process rather than inside
+    the sandbox. Bounding it properly means streaming the pipes and killing
+    the run on overflow; until then, ``timeout_seconds`` is the practical
+    limit on how much a payload can emit.
     """
 
     memory_mb: int = 256

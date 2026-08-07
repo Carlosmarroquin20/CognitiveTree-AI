@@ -122,3 +122,63 @@ def test_render_produces_one_line_per_node() -> None:
 
     assert len(rendering.splitlines()) == len(tree)
     assert "<root>" not in rendering  # root content is non-empty here
+
+
+def deep_tree(depth: int) -> ThoughtTree:
+    """Builds a single chain of ``depth`` nodes beneath the root."""
+    tree = ThoughtTree("root")
+    node = tree.root
+    for index in range(depth):
+        node = tree.add_child(node, f"step-{index}")
+    return tree
+
+
+# Comfortably past the interpreter's frame budget, where the previous
+# recursive traversals raised RecursionError at roughly 500 levels.
+_DEEP = 3000
+
+
+def test_deep_tree_serializes_without_recursion_error() -> None:
+    payload = deep_tree(_DEEP).to_dict(include_metadata=True)
+    assert payload["root"]["content"] == "root"
+
+
+def test_deep_tree_rebuilds_without_recursion_error() -> None:
+    tree = deep_tree(_DEEP)
+    rebuilt = ThoughtTree.from_dict(tree.to_dict(include_metadata=True))
+
+    assert len(rebuilt) == len(tree)
+    # Compared by walking rather than by nested equality: comparing the
+    # payloads directly would recurse inside Python's own dict comparison.
+    original = {n.id: (n.content, n.depth, n.status) for n in tree.nodes()}
+    restored = {n.id: (n.content, n.depth, n.status) for n in rebuilt.nodes()}
+    assert restored == original
+
+
+def test_deep_tree_renders_without_recursion_error() -> None:
+    tree = deep_tree(_DEEP)
+    assert len(tree.render().splitlines()) == len(tree)
+
+
+def test_deep_rebuild_restores_parent_links() -> None:
+    rebuilt = ThoughtTree.from_dict(deep_tree(_DEEP).to_dict())
+    leaves = [n for n in rebuilt.nodes() if not n.children]
+    assert len(leaves) == 1
+    assert leaves[0].depth == _DEEP
+    assert leaves[0].parent is not None
+
+
+def test_child_ordering_survives_the_iterative_rebuild() -> None:
+    tree = ThoughtTree("root")
+    for name in ("first", "second", "third"):
+        child = tree.add_child(tree.root, name)
+        tree.add_child(child, f"{name}-leaf")
+
+    rebuilt = ThoughtTree.from_dict(tree.to_dict())
+
+    assert [c.content for c in rebuilt.root.children] == ["first", "second", "third"]
+    assert [c.children[0].content for c in rebuilt.root.children] == [
+        "first-leaf",
+        "second-leaf",
+        "third-leaf",
+    ]
