@@ -38,7 +38,9 @@ from cognitivetree.ui.server import SessionFactory, StreamingUiServer
 
 API_KEY_ENV_VAR = "COGNITIVETREE_API_KEY"
 
-logger = logging.getLogger(__name__)
+# Named explicitly: run as ``python -m``, ``__name__`` is ``__main__``, which
+# tells an operator reading the logs nothing about where a line came from.
+logger = logging.getLogger("cognitivetree.ui.serve")
 
 
 def build_parser() -> argparse.ArgumentParser:
