@@ -311,6 +311,11 @@ python -m cognitivetree.ui.serve --backend llm \
     --task "..." --max-seconds 30
 ```
 
+Endpoints that require authentication read the bearer token from the
+`COGNITIVETREE_API_KEY` environment variable. `--api-key` still works but logs
+a warning, because command-line arguments are visible in shell history and
+process listings.
+
 `--max-seconds` maps to `SearchConfig.max_wall_seconds` and is honored by all
 three backends (`reference`, `llm-demo`, `llm`) — see **Global Time Budget**
 above.

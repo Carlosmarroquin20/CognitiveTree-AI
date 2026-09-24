@@ -11,7 +11,9 @@ from pathlib import Path
 
 import pytest
 
-from cognitivetree.ui.serve import build_parser, session_factory_from_args
+from cognitivetree.session import LlmSessionSpec
+from cognitivetree.ui import serve
+from cognitivetree.ui.serve import API_KEY_ENV_VAR, build_parser, session_factory_from_args
 
 
 def parse(argv: list[str]):
@@ -241,3 +243,43 @@ class TestReplayBackend:
         )
         factory = session_factory_from_args(args)
         assert factory() is not factory()
+
+
+class TestApiKey:
+    """The bearer token prefers the environment over the command line."""
+
+    ARGS = [
+        "--backend", "llm",
+        "--base-url", "http://localhost:11434/v1",
+        "--model", "llama3.3",
+        "--task", "do the thing",
+    ]
+
+    def captured_spec(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> LlmSessionSpec:
+        specs: list[LlmSessionSpec] = []
+        monkeypatch.setattr(serve, "build_llm_session", specs.append)
+        session_factory_from_args(parse(argv))()
+        return specs[0]
+
+    def test_key_is_read_from_the_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(API_KEY_ENV_VAR, "env-token")
+        assert self.captured_spec(monkeypatch, self.ARGS).api_key == "env-token"
+
+    def test_no_key_when_neither_source_is_set(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.delenv(API_KEY_ENV_VAR, raising=False)
+        assert self.captured_spec(monkeypatch, self.ARGS).api_key is None
+
+    def test_explicit_flag_still_works_but_warns(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        monkeypatch.setenv(API_KEY_ENV_VAR, "env-token")
+        spec = self.captured_spec(monkeypatch, [*self.ARGS, "--api-key", "flag-token"])
+        assert spec.api_key == "flag-token"
+        assert API_KEY_ENV_VAR in caplog.text
+        assert "flag-token" not in caplog.text

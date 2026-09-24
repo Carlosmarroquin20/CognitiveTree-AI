@@ -10,6 +10,9 @@ Examples:
         --task "Implement a run-length encoder as encode(text)." \\
         --harness-file checks.py
 
+    # Endpoint behind authentication: the key is read from the environment
+    COGNITIVETREE_API_KEY=... python -m cognitivetree.ui.serve --backend llm ...
+
     # Re-stream a saved run archive for offline inspection
     python -m cognitivetree.ui.serve --backend replay --archive runs/timed-out.json
 """
@@ -18,6 +21,7 @@ from __future__ import annotations
 
 import argparse
 import logging
+import os
 from pathlib import Path
 
 from cognitivetree.config import SearchConfig
@@ -28,6 +32,10 @@ from cognitivetree.session import (
     build_reference_session,
 )
 from cognitivetree.ui.server import SessionFactory, StreamingUiServer
+
+API_KEY_ENV_VAR = "COGNITIVETREE_API_KEY"
+
+logger = logging.getLogger(__name__)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -52,7 +60,14 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--base-url", help="endpoint root, e.g. http://localhost:11434/v1")
     parser.add_argument("--model", help="served model identifier, e.g. llama3.3")
     parser.add_argument("--task", help="task statement for the llm backend")
-    parser.add_argument("--api-key", help="bearer token when the endpoint requires one")
+    parser.add_argument(
+        "--api-key",
+        help=(
+            f"bearer token when the endpoint requires one; prefer the "
+            f"{API_KEY_ENV_VAR} environment variable, since command-line "
+            "arguments are visible in shell history and process listings"
+        ),
+    )
     parser.add_argument(
         "--harness-file",
         type=Path,
@@ -176,12 +191,19 @@ def session_factory_from_args(args: argparse.Namespace) -> SessionFactory:
             f"backend 'llm' requires {', '.join(missing)}"
         )
     harness = args.harness_file.read_text(encoding="utf-8") if args.harness_file else ""
+    if args.api_key:
+        logger.warning(
+            "--api-key exposes the key in shell history and process listings; "
+            "set %s instead",
+            API_KEY_ENV_VAR,
+        )
+    api_key = args.api_key or os.environ.get(API_KEY_ENV_VAR) or None
     spec = LlmSessionSpec(
         task=args.task,
         base_url=args.base_url,
         model=args.model,
         validation_harness=harness,
-        api_key=args.api_key,
+        api_key=api_key,
         use_llm_critic=args.llm_critic,
         config=SearchConfig(
             seed=None,
