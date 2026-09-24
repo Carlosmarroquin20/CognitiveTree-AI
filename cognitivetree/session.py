@@ -207,7 +207,9 @@ def build_llm_session(
     When the spec sets a consumption ceiling, the client is wrapped for
     accounting and the resulting tally becomes the run's stop condition. An
     already-accounting client is reused rather than double-wrapped, so its
-    caller keeps a handle on the same totals the budget enforces.
+    caller keeps a handle on the same totals the budget enforces. Each run
+    receives a fresh budget, so the ceiling applies per run even though the
+    client's totals keep accumulating across a reused session.
     """
     from cognitivetree.sandbox.backends import select_executor
 
@@ -216,15 +218,11 @@ def build_llm_session(
             base_url=spec.base_url, model=spec.model, api_key=spec.api_key
         )
 
-    stop_condition: TokenBudget | None = None
+    accounting: AccountingLlmClient | None = None
     if spec.max_tokens is not None or spec.max_llm_calls is not None:
         if not isinstance(client, AccountingLlmClient):
             client = AccountingLlmClient(client)
-        stop_condition = TokenBudget(
-            client,
-            max_total_tokens=spec.max_tokens,
-            max_calls=spec.max_llm_calls,
-        )
+        accounting = client
 
     executor, _ = select_executor()
 
@@ -233,6 +231,15 @@ def build_llm_session(
         critic = ChainedCritic([ExecutionTraceCritic(), LlmCritic(client)])
 
     def factory(sink: EventSink | None) -> TreeSearchController:
+        stop_condition = (
+            TokenBudget(
+                accounting,
+                max_total_tokens=spec.max_tokens,
+                max_calls=spec.max_llm_calls,
+            )
+            if accounting is not None
+            else None
+        )
         return TreeSearchController(
             config=spec.config,
             generator=LlmThoughtGenerator(client, temperature=spec.temperature),

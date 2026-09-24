@@ -19,6 +19,11 @@ class TokenBudget:
     the final total can exceed ``max_total_tokens`` by roughly one iteration's
     consumption. Sizing the ceiling below a hard quota, rather than at it, is
     what turns this into a guarantee.
+
+    Consumption is measured from the moment the budget is created, not from
+    the client's lifetime totals. A client shared across runs keeps
+    accumulating, and a budget bound to those totals would start every later
+    run already spent; creating one budget per run scopes it correctly.
     """
 
     def __init__(
@@ -34,6 +39,7 @@ class TokenBudget:
         self._client = client
         self._max_total_tokens = max_total_tokens
         self._max_calls = max_calls
+        self._baseline = client.usage
 
     @property
     def is_bounded(self) -> bool:
@@ -43,17 +49,16 @@ class TokenBudget:
     def check(self) -> str | None:
         """Returns why the run must stop, or ``None`` to let it continue."""
         usage = self._client.usage
-        if (
-            self._max_total_tokens is not None
-            and usage.total_tokens >= self._max_total_tokens
-        ):
+        tokens = usage.total_tokens - self._baseline.total_tokens
+        calls = usage.calls - self._baseline.calls
+        if self._max_total_tokens is not None and tokens >= self._max_total_tokens:
             return (
                 f"token budget of {self._max_total_tokens} exhausted: "
-                f"{usage.total_tokens} consumed across {usage.calls} calls"
+                f"{tokens} consumed across {calls} calls"
             )
-        if self._max_calls is not None and usage.calls >= self._max_calls:
+        if self._max_calls is not None and calls >= self._max_calls:
             return (
                 f"call budget of {self._max_calls} exhausted: "
-                f"{usage.calls} calls consuming {usage.total_tokens} tokens"
+                f"{calls} calls consuming {tokens} tokens"
             )
         return None

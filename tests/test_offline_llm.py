@@ -11,6 +11,7 @@ from cognitivetree.llm.demo import (
 )
 from cognitivetree.llm.prompts import CRITIC_SYSTEM_PROMPT, GENERATOR_SYSTEM_PROMPT
 from cognitivetree.llm.scripted import ScriptedLlmClient
+from cognitivetree.observability import AccountingLlmClient
 from cognitivetree.sandbox.demo import VALIDATION_HARNESS
 from cognitivetree.search import SearchOutcome
 from cognitivetree.session import LlmSessionSpec, build_llm_session
@@ -73,6 +74,27 @@ def test_build_llm_session_accepts_injected_client() -> None:
     result = build_llm_session(spec, client=ScriptedLlmClient(clamp_responder)).run()
     assert result.outcome is SearchOutcome.SUCCEEDED
     assert result.solution == REVISED_CANDIDATE
+
+
+def test_reused_session_applies_its_budget_per_run() -> None:
+    # The clamp scenario solves in two generator calls, so a three-call
+    # ceiling admits every run while a session-wide tally would stop the
+    # second one after its first iteration.
+    client = AccountingLlmClient(ScriptedLlmClient(clamp_responder))
+    spec = LlmSessionSpec(
+        task=TASK,
+        base_url="unused://offline",
+        model="scripted",
+        validation_harness=VALIDATION_HARNESS,
+        config=SearchConfig(max_iterations=16, max_depth=1, branching_factor=3, seed=7),
+        max_llm_calls=3,
+    )
+    session = build_llm_session(spec, client=client)
+
+    outcomes = [session.run().outcome for _ in range(3)]
+    assert outcomes == [SearchOutcome.SUCCEEDED] * 3
+    # The caller's handle still reports lifetime totals across every run.
+    assert client.usage.calls == 6
 
 
 def test_offline_session_streams_to_completion() -> None:

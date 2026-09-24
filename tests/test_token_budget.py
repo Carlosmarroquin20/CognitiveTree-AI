@@ -92,6 +92,18 @@ class TestTokenBudget:
         reason = budget.check()
         assert reason is not None and reason.startswith("token budget")
 
+    def test_consumption_before_creation_is_not_charged(self) -> None:
+        client = AccountingLlmClient(SpendingClient(tokens_per_call=10))
+        spend(client, 5)
+        budget = TokenBudget(client, max_total_tokens=25, max_calls=3)
+        assert budget.check() is None
+        spend(client, 2)
+        assert budget.check() is None
+        spend(client, 1)
+        reason = budget.check()
+        assert reason is not None
+        assert "30 consumed across 3 calls" in reason
+
     def test_budget_satisfies_the_stop_condition_protocol(self) -> None:
         client = AccountingLlmClient(SpendingClient())
         assert isinstance(TokenBudget(client, max_total_tokens=1), StopCondition)
