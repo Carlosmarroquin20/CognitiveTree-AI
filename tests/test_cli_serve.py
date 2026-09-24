@@ -264,7 +264,9 @@ class TestApiKey:
         self, monkeypatch: pytest.MonkeyPatch, argv: list[str]
     ) -> LlmSessionSpec:
         specs: list[LlmSessionSpec] = []
-        monkeypatch.setattr(serve, "build_llm_session", specs.append)
+        monkeypatch.setattr(
+            serve, "build_llm_session", lambda spec, **_: specs.append(spec)
+        )
         session_factory_from_args(parse(argv))()
         return specs[0]
 
@@ -335,3 +337,40 @@ class TestTemperatures:
     def test_out_of_range_values_are_rejected(self, flag: str, value: str) -> None:
         with pytest.raises(SystemExit, match=flag):
             session_factory_from_args(parse([*TestApiKey.ARGS, flag, value]))
+
+
+class TestCompletionCacheFlag:
+    """--cache-completions shares one store across every connection."""
+
+    def captured_calls(
+        self, monkeypatch: pytest.MonkeyPatch, argv: list[str]
+    ) -> list[tuple[LlmSessionSpec, object]]:
+        calls: list[tuple[LlmSessionSpec, object]] = []
+        monkeypatch.setattr(
+            serve,
+            "build_llm_session",
+            lambda spec, completion_cache=None: calls.append((spec, completion_cache)),
+        )
+        factory = session_factory_from_args(parse(argv))
+        factory()
+        factory()
+        return calls
+
+    def test_disabled_by_default(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        calls = self.captured_calls(monkeypatch, TestApiKey.ARGS)
+        assert all(not spec.cache_completions and store is None for spec, store in calls)
+
+    def test_connections_share_one_store(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        argv = [*TestApiKey.ARGS, "--cache-completions", "--temperature", "0"]
+        (first_spec, first_store), (_, second_store) = self.captured_calls(monkeypatch, argv)
+        assert first_spec.cache_completions
+        assert first_store is not None and first_store is second_store
+        assert "no effect" not in caplog.text
+
+    def test_warns_when_no_role_is_deterministic(
+        self, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        self.captured_calls(monkeypatch, [*TestApiKey.ARGS, "--cache-completions"])
+        assert "--cache-completions has no effect" in caplog.text

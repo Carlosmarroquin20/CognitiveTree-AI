@@ -26,6 +26,7 @@ import os
 from pathlib import Path
 
 from cognitivetree.config import SearchConfig
+from cognitivetree.llm.caching import CompletionCache
 from cognitivetree.session import (
     LlmSessionSpec,
     ReasoningSession,
@@ -85,6 +86,14 @@ def build_parser() -> argparse.ArgumentParser:
         type=float,
         default=0.2,
         help="LLM critic sampling temperature, used with --llm-critic (default: 0.2)",
+    )
+    parser.add_argument(
+        "--cache-completions",
+        action="store_true",
+        help=(
+            "replay completions for repeated identical requests across runs; "
+            "only temperature-0 requests are cached"
+        ),
     )
     parser.add_argument(
         "--llm-critic",
@@ -244,12 +253,30 @@ def session_factory_from_args(args: argparse.Namespace) -> SessionFactory:
         ),
         max_tokens=args.max_tokens,
         max_llm_calls=args.max_llm_calls,
+        cache_completions=args.cache_completions,
     )
 
+    # One store for the whole server: each connection builds its own session,
+    # and only a shared store lets later runs reuse earlier completions.
+    completion_cache = CompletionCache() if args.cache_completions else None
+    if completion_cache is not None and not _has_deterministic_role(args):
+        logger.warning(
+            "--cache-completions has no effect: only temperature-0 requests "
+            "are cached; set --temperature 0 (or --critic-temperature 0 with "
+            "--llm-critic)"
+        )
+
     def factory() -> ReasoningSession:
-        return build_llm_session(spec)
+        return build_llm_session(spec, completion_cache=completion_cache)
 
     return factory
+
+
+def _has_deterministic_role(args: argparse.Namespace) -> bool:
+    """Reports whether any LLM role samples at temperature 0."""
+    generator_cached = args.temperature == 0.0
+    critic_cached = args.llm_critic and args.critic_temperature == 0.0
+    return bool(generator_cached or critic_cached)
 
 
 def is_loopback_host(host: str) -> bool:

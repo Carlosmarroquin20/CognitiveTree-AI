@@ -325,6 +325,15 @@ process listings.
 set the sampling temperature of the generator and the LLM critic. `0` makes a
 role deterministic, which reproducible runs and completion caching need.
 
+`--cache-completions` replays completions for repeated identical requests
+from one store shared by every connection. Only temperature-0 requests are
+cached, since a sampled request is repeated precisely to get a different
+answer; the CLI warns when no role is deterministic. The cache sits outside
+token accounting, so `--max-tokens` and `--max-llm-calls` count only real
+backend traffic. Measured on the offline clamp scenario at temperature 0, a
+second identical run costs 0 backend calls and 0 tokens, against 2 calls and
+430 tokens without the cache.
+
 `--max-seconds` maps to `SearchConfig.max_wall_seconds` and is honored by all
 three backends (`reference`, `llm-demo`, `llm`) — see **Global Time Budget**
 above.

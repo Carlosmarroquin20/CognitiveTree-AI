@@ -24,6 +24,7 @@ from cognitivetree.feedback.composite import ChainedCritic
 from cognitivetree.feedback.execution_critic import ExecutionTraceCritic
 from cognitivetree.feedback.revision import BoundedRevisionPolicy
 from cognitivetree.feedback.rewards import RewardShaper
+from cognitivetree.llm.caching import CachingLlmClient, CompletionCache
 from cognitivetree.llm.client import LlmClient
 from cognitivetree.llm.critic import LlmCritic
 from cognitivetree.llm.generator import LlmThoughtGenerator
@@ -196,6 +197,9 @@ class LlmSessionSpec:
             outcome ``budget_exhausted`` once crossed. ``None`` leaves
             consumption unbounded.
         max_llm_calls: Completion-count ceiling, applied on the same terms.
+        cache_completions: Replays completions for repeated identical
+            requests. Only temperature-0 requests are cached, so this takes
+            effect only for a role configured with temperature ``0``.
     """
 
     task: str
@@ -210,6 +214,7 @@ class LlmSessionSpec:
     revision_attempts: int = 1
     max_tokens: int | None = None
     max_llm_calls: int | None = None
+    cache_completions: bool = False
 
     def __post_init__(self) -> None:
         # Validated here so a bad value fails at startup; the completion
@@ -220,7 +225,9 @@ class LlmSessionSpec:
 
 
 def build_llm_session(
-    spec: LlmSessionSpec, client: LlmClient | None = None
+    spec: LlmSessionSpec,
+    client: LlmClient | None = None,
+    completion_cache: CompletionCache | None = None,
 ) -> ReasoningSession:
     """Wires a session around a chat-completion backend.
 
@@ -235,6 +242,11 @@ def build_llm_session(
     caller keeps a handle on the same totals the budget enforces. Each run
     receives a fresh budget, so the ceiling applies per run even though the
     client's totals keep accumulating across a reused session.
+
+    With ``spec.cache_completions`` the cache sits outside the accounting
+    layer, so budgets count only real backend calls and tokens.
+    ``completion_cache`` supplies a store to share across sessions; without
+    one, the session gets a private store that persists across its runs.
     """
     from cognitivetree.sandbox.backends import select_executor
 
@@ -248,6 +260,8 @@ def build_llm_session(
         if not isinstance(client, AccountingLlmClient):
             client = AccountingLlmClient(client)
         accounting = client
+    if spec.cache_completions:
+        client = CachingLlmClient(client, completion_cache)
 
     executor, _ = select_executor()
 
