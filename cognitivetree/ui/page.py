@@ -173,14 +173,15 @@ function finish(env) {
 }
 
 const source = new EventSource("/stream");
-source.onopen = () => { statusEl.textContent = "running"; };
+let opened = false;
+source.onopen = () => { opened = true; statusEl.textContent = "running"; };
 source.addEventListener("phase", e => appendLog(JSON.parse(e.data)));
 source.addEventListener("snapshot", e => renderTree(JSON.parse(e.data)));
 source.addEventListener("metrics", e => renderMetrics(JSON.parse(e.data).metrics));
 source.addEventListener("result", e => { finish(JSON.parse(e.data)); source.close(); });
 source.onerror = () => {
   if (statusEl.className === "running") {
-    statusEl.textContent = "disconnected";
+    statusEl.textContent = opened ? "disconnected" : "unavailable (server busy or unreachable)";
     statusEl.className = "failed";
   }
   source.close();

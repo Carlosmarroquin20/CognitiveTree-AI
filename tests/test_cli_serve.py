@@ -305,3 +305,12 @@ class TestApiKey:
 )
 def test_loopback_detection(host: str, loopback: bool) -> None:
     assert is_loopback_host(host) is loopback
+
+
+def test_concurrent_runs_are_capped_by_default() -> None:
+    assert parse([]).max_concurrent_runs == 4
+
+
+def test_non_positive_concurrency_cap_is_rejected() -> None:
+    with pytest.raises(SystemExit, match="max-concurrent-runs"):
+        session_factory_from_args(parse(["--max-concurrent-runs", "0"]))

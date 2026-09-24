@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import threading
 from collections.abc import Callable, Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Protocol, runtime_checkable
@@ -37,6 +38,8 @@ SessionFactory = Callable[[], StreamingSession]
 
 _CLIENT_DISCONNECTS = (BrokenPipeError, ConnectionResetError, ConnectionAbortedError)
 
+_BUSY_RETRY_AFTER_SECONDS = 5
+
 
 class _Handler(BaseHTTPRequestHandler):
     """Routes the two-endpoint surface: the page and the event stream."""
@@ -65,7 +68,20 @@ class _Handler(BaseHTTPRequestHandler):
 
         Each connection gets its own run; a disconnect stops the transmission
         while the worker thread drains the remaining envelopes and finishes.
+        A request beyond the server's concurrency cap is refused with 503
+        before any session is built.
         """
+        slots = self.server.run_slots
+        if slots is not None and not slots.acquire(blocking=False):
+            self._refuse_busy()
+            return
+        try:
+            self._stream_session()
+        finally:
+            if slots is not None:
+                slots.release()
+
+    def _stream_session(self) -> None:
         session = self.server.session_factory()
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -79,6 +95,15 @@ class _Handler(BaseHTTPRequestHandler):
         except _CLIENT_DISCONNECTS:
             logger.info("stream client disconnected mid-run")
 
+    def _refuse_busy(self) -> None:
+        body = b"concurrent run limit reached; retry shortly\n"
+        self.send_response(503)
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Retry-After", str(_BUSY_RETRY_AFTER_SECONDS))
+        self.end_headers()
+        self.wfile.write(body)
+
     def log_message(self, format: str, *args: object) -> None:
         """Redirects access logging to the module logger."""
         logger.debug("%s - %s", self.address_string(), format % args)
@@ -89,15 +114,28 @@ class StreamingUiServer(ThreadingHTTPServer):
 
     Every ``/stream`` request receives an independent reasoning run, so
     multiple observers can trigger and watch runs concurrently.
+    ``max_concurrent_runs`` bounds how many run at once; each one may spawn
+    sandboxed executions and spend model quota, so an unbounded server can be
+    exhausted by opening connections. ``None`` leaves it unbounded.
     """
 
     daemon_threads = True
 
     def __init__(
-        self, address: tuple[str, int], session_factory: SessionFactory
+        self,
+        address: tuple[str, int],
+        session_factory: SessionFactory,
+        max_concurrent_runs: int | None = None,
     ) -> None:
+        if max_concurrent_runs is not None and max_concurrent_runs < 1:
+            raise ValueError("max_concurrent_runs must be a positive integer")
         super().__init__(address, _Handler)
         self.session_factory = session_factory
+        self.run_slots = (
+            threading.BoundedSemaphore(max_concurrent_runs)
+            if max_concurrent_runs is not None
+            else None
+        )
 
     @property
     def url(self) -> str:

@@ -127,6 +127,15 @@ def build_parser() -> argparse.ArgumentParser:
             "the run's original timing, 2.0 for twice that pace"
         ),
     )
+    parser.add_argument(
+        "--max-concurrent-runs",
+        type=int,
+        default=4,
+        help=(
+            "runs allowed to stream at once; further /stream requests are "
+            "refused with 503 until one finishes (default: 4)"
+        ),
+    )
     parser.add_argument("--verbose", action="store_true", help="debug logging")
     return parser
 
@@ -143,6 +152,8 @@ def session_factory_from_args(args: argparse.Namespace) -> SessionFactory:
         raise SystemExit("--max-llm-calls must be a positive integer")
     if args.eval_workers < 1:
         raise SystemExit("--eval-workers must be a positive integer")
+    if args.max_concurrent_runs < 1:
+        raise SystemExit("--max-concurrent-runs must be a positive integer")
     if args.backend == "reference" and (
         args.max_tokens is not None or args.max_llm_calls is not None
     ):
@@ -248,7 +259,11 @@ def main(argv: list[str] | None = None) -> None:
             "is trusted",
             args.host,
         )
-    server = StreamingUiServer((args.host, args.port), session_factory_from_args(args))
+    server = StreamingUiServer(
+        (args.host, args.port),
+        session_factory_from_args(args),
+        max_concurrent_runs=args.max_concurrent_runs,
+    )
     print(f"CognitiveTree-AI streaming interface: {server.url}")
     print(f"backend: {args.backend} | stream endpoint: {server.url}stream")
     print("press Ctrl+C to stop")
