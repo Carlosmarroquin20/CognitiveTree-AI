@@ -261,6 +261,7 @@ backend, which runs no model and would silently never fire them.
 | `cognitivetree/feedback/demo.py` | End-to-end demo of the fail → critique → revise → succeed cycle |
 | `cognitivetree/llm/client.py` | Completion contracts: `LlmClient`, `ChatMessage`, `CompletionRequest/Response` |
 | `cognitivetree/llm/openai_compatible.py` | HTTP client for Ollama / vLLM / llama.cpp / LM Studio, injected transport, bounded retries with exponential backoff |
+| `cognitivetree/llm/caching.py` | `CachingLlmClient`: bounded LRU replay of identical deterministic requests; hits report zero tokens |
 | `cognitivetree/llm/generator.py` | `LlmThoughtGenerator`: path- and revision-aware expansion prompting |
 | `cognitivetree/llm/critic.py` | `LlmCritic`: JSON-verdict semantic critique, degrades instead of failing |
 | `cognitivetree/llm/prompts.py` | Auditable prompt templates for the LLM policies |
