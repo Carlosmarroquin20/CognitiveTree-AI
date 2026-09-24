@@ -73,17 +73,23 @@ class DockerSandboxExecutor:
 
     @staticmethod
     def is_available(docker_binary: str = "docker", timeout: float = 10.0) -> bool:
-        """Probes whether the Docker daemon is reachable through ``docker_binary``."""
+        """Probes whether a daemon able to run the sandbox image is reachable.
+
+        The image is Linux-only, so a daemon in Windows-container mode counts
+        as unavailable: it answers the probe but can neither build nor run
+        the image, and treating it as usable turns every run into a build
+        failure instead of a clean fallback.
+        """
         try:
             probe = subprocess.run(
-                [docker_binary, "info", "--format", "{{.ServerVersion}}"],
+                [docker_binary, "info", "--format", "{{.OSType}}"],
                 capture_output=True,
                 text=True,
                 timeout=timeout,
             )
         except (OSError, subprocess.TimeoutExpired):
             return False
-        return probe.returncode == 0 and bool(probe.stdout.strip())
+        return probe.returncode == 0 and probe.stdout.strip().lower() == "linux"
 
     def execute(self, request: ExecutionRequest) -> ExecutionResult:
         """Runs ``request`` in a fresh container and returns its result record."""

@@ -10,12 +10,14 @@ started mid-process is picked up within one interval.
 
 from __future__ import annotations
 
+import logging
 import threading
 import time
 
 from cognitivetree.sandbox.docker_executor import (
     DockerSandboxConfig,
     DockerSandboxExecutor,
+    DockerUnavailableError,
     ensure_image,
 )
 from cognitivetree.sandbox.executor import CodeExecutor
@@ -27,6 +29,9 @@ _lock = threading.Lock()
 _probe_expiry = 0.0
 _probe_result = False
 _image_ready = False
+_image_error: str | None = None
+
+logger = logging.getLogger(__name__)
 
 
 def docker_available(ttl_seconds: float = _PROBE_TTL_SECONDS) -> bool:
@@ -47,16 +52,29 @@ def select_executor() -> tuple[CodeExecutor, str]:
     """Returns the strongest available execution backend and its description.
 
     The sandbox image is built at most once per process; subsequent
-    selections reuse the verified image without re-inspecting it.
+    selections reuse the verified image without re-inspecting it. A failed
+    build is remembered for the same lifetime and degrades to the host
+    executor: retrying a build that may take minutes on every session would
+    stall each connection, and the failure cause rarely heals mid-process.
     """
-    global _image_ready
-    if docker_available():
+    global _image_ready, _image_error
+    if docker_available() and _image_error is None:
         config = DockerSandboxConfig()
         if not _image_ready:
-            ensure_image(config, build_if_missing=True)
-            _image_ready = True
-        return DockerSandboxExecutor(config), f"docker ({config.image})"
+            try:
+                ensure_image(config, build_if_missing=True)
+            except DockerUnavailableError as exc:
+                _image_error = str(exc)
+                logger.warning("docker backend disabled for this process: %s", exc)
+            else:
+                _image_ready = True
+        if _image_ready:
+            return DockerSandboxExecutor(config), f"docker ({config.image})"
+    if _image_error is not None:
+        reason = "sandbox image unavailable"
+    else:
+        reason = "Docker daemon unreachable"
     return (
         SubprocessExecutor(),
-        "subprocess fallback (no isolation; Docker daemon unreachable)",
+        f"subprocess fallback (no isolation; {reason})",
     )
