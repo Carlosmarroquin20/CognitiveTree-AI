@@ -444,8 +444,13 @@ standard `extra` mapping, so library code keeps using plain `logging` calls.
 `configure_logging` and `JsonLogFormatter` are exported for embedding
 applications that own their process.
 
+Every finished session run is reported as one `run_finished` event carrying
+its outcome, iterations, nodes, wall time, tokens, LLM calls, archive path,
+and error, so runs are queryable without opening their archives. Failed runs
+log at warning level:
+
 ```json
-{"ts": "2026-09-24T21:57:20.630+00:00", "level": "warning", "logger": "cognitivetree.ui.serve", "message": "binding to 0.0.0.0 exposes an unauthenticated endpoint ..."}
+{"ts": "2026-09-24T22:00:41.467+00:00", "level": "info", "logger": "cognitivetree.session", "message": "run succeeded after 2 iterations", "event": "run_finished", "outcome": "succeeded", "iterations": 2, "nodes": 5, "wall_seconds": 0.36, "tokens": 430, "llm_calls": 2, "archive": null, "error": null}
 ```
 
 ## Benchmarking

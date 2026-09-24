@@ -39,7 +39,12 @@ from cognitivetree.observability.metrics import RunMetrics, TokenUsage
 from cognitivetree.persistence.archive import save_run
 from cognitivetree.policies import Critic
 from cognitivetree.sandbox.evaluation import CodeExecutionEvaluator
-from cognitivetree.search import SearchEvent, SearchResult, TreeSearchController
+from cognitivetree.search import (
+    SearchEvent,
+    SearchOutcome,
+    SearchResult,
+    TreeSearchController,
+)
 from cognitivetree.state import TERMINAL_PHASES, SearchPhase
 from cognitivetree.ui.events import (
     metrics_envelope,
@@ -100,7 +105,7 @@ class ReasoningSession:
         """Executes the task synchronously without event streaming."""
         baseline = self._usage() if self._usage is not None else None
         result = self._factory(None).run(self._task)
-        self._archive(result, self._metrics(result, baseline))
+        self._settle(result, self._metrics(result, baseline))
         return result
 
     def stream(self) -> Iterator[dict[str, Any]]:
@@ -136,7 +141,7 @@ class ReasoningSession:
                 baseline = self._usage() if self._usage is not None else None
                 result = controller.run(self._task, cancel_event=cancel)
                 metrics = self._metrics(result, baseline)
-                self._archive(result, metrics)
+                self._settle(result, metrics)
                 envelopes.put(metrics_envelope(metrics.to_dict()))
                 envelopes.put(result_envelope(result))
             finally:
@@ -167,6 +172,34 @@ class ReasoningSession:
             else None
         )
         return RunMetrics.from_result(result, token_usage=spent)
+
+    def _settle(self, result: SearchResult, metrics: RunMetrics) -> None:
+        """Archives a finished run and reports it as one structured log event.
+
+        The event is the operator's record of the run: with JSON logging its
+        fields are queryable without opening the archive. Failed runs log at
+        warning level, since they signal a broken backend rather than a hard
+        task.
+        """
+        archive = self._archive(result, metrics)
+        usage = metrics.token_usage
+        logger.log(
+            logging.WARNING if result.outcome is SearchOutcome.FAILED else logging.INFO,
+            "run %s after %d iterations",
+            result.outcome.value,
+            result.iterations,
+            extra={
+                "event": "run_finished",
+                "outcome": result.outcome.value,
+                "iterations": result.iterations,
+                "nodes": result.node_count,
+                "wall_seconds": round(metrics.wall_time_seconds, 3),
+                "tokens": usage.total_tokens if usage is not None else None,
+                "llm_calls": usage.calls if usage is not None else None,
+                "archive": str(archive) if archive is not None else None,
+                "error": result.error or None,
+            },
+        )
 
     def _archive(self, result: SearchResult, metrics: RunMetrics) -> Path | None:
         """Saves ``result`` under the archive directory, when one is set.

@@ -7,9 +7,11 @@ from pathlib import Path
 import pytest
 from conftest import EndlessRun
 
+from cognitivetree.config import SearchConfig
 from cognitivetree.persistence import ReplaySession, load_run
-from cognitivetree.search import SearchOutcome
-from cognitivetree.session import ReasoningSession, build_reference_session
+from cognitivetree.policies import Evaluation
+from cognitivetree.search import SearchOutcome, TreeSearchController
+from cognitivetree.session import EventSink, ReasoningSession, build_reference_session
 from cognitivetree.state import SearchPhase
 
 
@@ -141,3 +143,72 @@ class TestRunArchiving:
         monkeypatch.chdir(tmp_path)
         build_reference_session().run()
         assert list(tmp_path.rglob("*.json")) == []
+
+
+def _finished_events(caplog: pytest.LogCaptureFixture) -> list[logging.LogRecord]:
+    return [r for r in caplog.records if getattr(r, "event", None) == "run_finished"]
+
+
+class BrokenBackend:
+    """Fails every expansion, as an unreachable model backend would."""
+
+    def generate(self, node: object, k: int) -> list[str]:
+        raise RuntimeError("backend unreachable")
+
+    def evaluate(self, node: object) -> Evaluation:
+        return Evaluation(score=0.5)
+
+
+class TestRunFinishedEvent:
+    """Every finished run is reported as one structured log record."""
+
+    def test_successful_run_logs_its_summary(self, caplog: pytest.LogCaptureFixture) -> None:
+        with caplog.at_level(logging.INFO, logger="cognitivetree.session"):
+            result = build_reference_session().run()
+
+        (record,) = _finished_events(caplog)
+        assert record.levelno == logging.INFO
+        assert record.getMessage() == f"run succeeded after {result.iterations} iterations"
+        assert record.outcome == "succeeded"
+        assert record.nodes == result.node_count
+        assert record.tokens is None and record.archive is None and record.error is None
+
+    def test_archived_run_logs_its_archive_path(
+        self, tmp_path: Path, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.INFO, logger="cognitivetree.session"):
+            build_reference_session(archive_dir=tmp_path).run()
+
+        (record,) = _finished_events(caplog)
+        (path,) = tmp_path.glob("*.json")
+        assert record.archive == str(path)
+
+    def test_failed_run_logs_a_warning_with_the_error(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        def factory(sink: EventSink | None) -> TreeSearchController:
+            backend = BrokenBackend()
+            return TreeSearchController(
+                config=SearchConfig(seed=1),
+                generator=backend,
+                evaluator=backend,
+                on_event=sink,
+            )
+
+        with caplog.at_level(logging.INFO, logger="cognitivetree.session"):
+            ReasoningSession("broken", factory).run()
+
+        (record,) = _finished_events(caplog)
+        assert record.levelno == logging.WARNING
+        assert record.outcome == "failed"
+        assert "backend unreachable" in record.error
+
+    def test_streamed_llm_run_logs_its_tokens(self, caplog: pytest.LogCaptureFixture) -> None:
+        from cognitivetree.llm.demo import build_offline_session
+
+        with caplog.at_level(logging.INFO, logger="cognitivetree.session"):
+            list(build_offline_session().stream())
+
+        (record,) = _finished_events(caplog)
+        assert record.tokens > 0
+        assert record.llm_calls == 2
