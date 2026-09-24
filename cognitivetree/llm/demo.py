@@ -15,6 +15,7 @@ Run with: ``python -m cognitivetree.llm.demo``
 from __future__ import annotations
 
 from collections.abc import Callable
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from cognitivetree.config import SearchConfig
@@ -144,11 +145,13 @@ def build_offline_session(
     max_wall_seconds: float | None = None,
     max_tokens: int | None = None,
     evaluation_workers: int = 1,
+    archive_dir: str | Path | None = None,
 ) -> ReasoningSession:
     """Builds a streaming session over the scripted LLM stack.
 
     The UI's ``llm-demo`` backend uses this to exercise the LLM path live
     without a model; each connection receives an independent scripted run.
+    ``archive_dir`` saves every run there; see :class:`ReasoningSession`.
     """
     from cognitivetree.session import ReasoningSession
 
@@ -160,6 +163,7 @@ def build_offline_session(
             max_tokens=max_tokens,
             evaluation_workers=evaluation_workers,
         ),
+        archive_dir=archive_dir,
     )
 
 

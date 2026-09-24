@@ -13,10 +13,14 @@ OpenAI-compatible backend serving an open-source model.
 
 from __future__ import annotations
 
+import logging
 import queue
 import threading
+import uuid
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import Any
 
 from cognitivetree.config import SearchConfig
@@ -32,6 +36,7 @@ from cognitivetree.llm.openai_compatible import OpenAICompatibleClient
 from cognitivetree.observability.accounting import AccountingLlmClient
 from cognitivetree.observability.budget import TokenBudget
 from cognitivetree.observability.metrics import RunMetrics
+from cognitivetree.persistence.archive import save_run
 from cognitivetree.policies import Critic
 from cognitivetree.sandbox.evaluation import CodeExecutionEvaluator
 from cognitivetree.search import SearchEvent, SearchResult, TreeSearchController
@@ -48,6 +53,8 @@ ControllerFactory = Callable[[EventSink | None], TreeSearchController]
 
 _SNAPSHOT_PHASES = frozenset({SearchPhase.BACKPROPAGATION}) | TERMINAL_PHASES
 
+logger = logging.getLogger(__name__)
+
 
 class ReasoningSession:
     """Owns one task run end-to-end.
@@ -55,13 +62,25 @@ class ReasoningSession:
     Each :meth:`run` or :meth:`stream` call builds a fresh controller through
     the injected factory, so a session object can be reused and concurrent
     streams never share mutable search state.
+
+    With ``archive_dir`` set, every finished run, cancelled and failed ones
+    included, is saved there as a run archive that the replay backend can
+    reopen. A run that could not be archived still returns its result: the
+    write failure is logged rather than raised, since losing the archive is
+    better than losing the run.
     """
 
-    def __init__(self, task: str, controller_factory: ControllerFactory) -> None:
+    def __init__(
+        self,
+        task: str,
+        controller_factory: ControllerFactory,
+        archive_dir: str | Path | None = None,
+    ) -> None:
         if not task.strip():
             raise ValueError("task must be a non-empty statement")
         self._task = task
         self._factory = controller_factory
+        self._archive_dir = Path(archive_dir) if archive_dir is not None else None
 
     @property
     def task(self) -> str:
@@ -69,7 +88,9 @@ class ReasoningSession:
 
     def run(self) -> SearchResult:
         """Executes the task synchronously without event streaming."""
-        return self._factory(None).run(self._task)
+        result = self._factory(None).run(self._task)
+        self._archive(result, RunMetrics.from_result(result))
+        return result
 
     def stream(self) -> Iterator[dict[str, Any]]:
         """Executes the task on a worker thread, yielding envelopes in order.
@@ -103,6 +124,7 @@ class ReasoningSession:
             try:
                 result = controller.run(self._task, cancel_event=cancel)
                 metrics = RunMetrics.from_result(result)
+                self._archive(result, metrics)
                 envelopes.put(metrics_envelope(metrics.to_dict()))
                 envelopes.put(result_envelope(result))
             finally:
@@ -125,9 +147,28 @@ class ReasoningSession:
                 cancel.set()
         worker.join(timeout=10.0)
 
+    def _archive(self, result: SearchResult, metrics: RunMetrics) -> Path | None:
+        """Saves ``result`` under the archive directory, when one is set.
+
+        Names sort chronologically and carry the outcome, so a directory
+        listing reads as a run log; the random suffix keeps concurrent runs
+        finishing in the same second from overwriting each other.
+        """
+        if self._archive_dir is None:
+            return None
+        stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+        name = f"{stamp}-{result.outcome.value}-{uuid.uuid4().hex[:6]}.json"
+        try:
+            return save_run(result, self._archive_dir / name, metrics=metrics.to_dict())
+        except OSError as exc:
+            logger.warning("run archive could not be written: %s", exc)
+            return None
+
 
 def build_reference_session(
-    max_wall_seconds: float | None = None, evaluation_workers: int = 1
+    max_wall_seconds: float | None = None,
+    evaluation_workers: int = 1,
+    archive_dir: str | Path | None = None,
 ) -> ReasoningSession:
     """Wires the deterministic reference scenario end-to-end.
 
@@ -138,6 +179,7 @@ def build_reference_session(
 
     ``max_wall_seconds`` threads through to the run's global time budget;
     ``None`` (the default) leaves the search unbounded, as before.
+    ``archive_dir`` saves every run there; see :class:`ReasoningSession`.
     """
     from cognitivetree.feedback.demo import GuidanceSensitiveGenerator
     from cognitivetree.sandbox.backends import select_executor
@@ -168,6 +210,7 @@ def build_reference_session(
     return ReasoningSession(
         task="Implement clamp(value, low, high) correctly.",
         controller_factory=factory,
+        archive_dir=archive_dir,
     )
 
 
@@ -228,6 +271,7 @@ def build_llm_session(
     spec: LlmSessionSpec,
     client: LlmClient | None = None,
     completion_cache: CompletionCache | None = None,
+    archive_dir: str | Path | None = None,
 ) -> ReasoningSession:
     """Wires a session around a chat-completion backend.
 
@@ -247,6 +291,7 @@ def build_llm_session(
     layer, so budgets count only real backend calls and tokens.
     ``completion_cache`` supplies a store to share across sessions; without
     one, the session gets a private store that persists across its runs.
+    ``archive_dir`` saves every run there; see :class:`ReasoningSession`.
     """
     from cognitivetree.sandbox.backends import select_executor
 
@@ -297,4 +342,6 @@ def build_llm_session(
             stop_condition=stop_condition,
         )
 
-    return ReasoningSession(task=spec.task, controller_factory=factory)
+    return ReasoningSession(
+        task=spec.task, controller_factory=factory, archive_dir=archive_dir
+    )

@@ -534,6 +534,18 @@ result and cannot be re-derived from the tree.
 Archives declare a `format` and `version`; unrecognized or future documents
 are refused with `ArchiveFormatError` instead of loading partially.
 
+Sessions archive automatically when given a directory: every finished run,
+cancelled and failed ones included, is saved as
+`<UTC timestamp>-<outcome>-<suffix>.json`, so a directory listing reads as a
+run log. A write failure is logged rather than raised, since losing the
+archive is better than losing the run.
+
+```bash
+# Record every run the server executes, then reopen one later
+python -m cognitivetree.ui.serve --archive-dir runs
+python -m cognitivetree.ui.serve --backend replay --archive runs/20260924T215022Z-succeeded-6386c1.json
+```
+
 ```bash
 # Archive a budget-limited run, drop it from memory, reopen and diagnose it
 python -m cognitivetree.persistence.demo

@@ -349,7 +349,7 @@ class TestCompletionCacheFlag:
         monkeypatch.setattr(
             serve,
             "build_llm_session",
-            lambda spec, completion_cache=None: calls.append((spec, completion_cache)),
+            lambda spec, completion_cache=None, **_: calls.append((spec, completion_cache)),
         )
         factory = session_factory_from_args(parse(argv))
         factory()
@@ -374,3 +374,33 @@ class TestCompletionCacheFlag:
     ) -> None:
         self.captured_calls(monkeypatch, [*TestApiKey.ARGS, "--cache-completions"])
         assert "--cache-completions has no effect" in caplog.text
+
+
+class TestArchiveDir:
+    """--archive-dir reaches every live backend and is refused for replay."""
+
+    @pytest.mark.parametrize("backend", ["reference", "llm-demo"])
+    def test_directory_reaches_the_session(self, backend: str, tmp_path: Path) -> None:
+        args = parse(["--backend", backend, "--archive-dir", str(tmp_path)])
+        session = session_factory_from_args(args)()
+        assert session._archive_dir == tmp_path
+
+    def test_directory_reaches_the_llm_session(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+    ) -> None:
+        received: list[object] = []
+        monkeypatch.setattr(
+            serve,
+            "build_llm_session",
+            lambda spec, **kwargs: received.append(kwargs.get("archive_dir")),
+        )
+        argv = [*TestApiKey.ARGS, "--archive-dir", str(tmp_path)]
+        session_factory_from_args(parse(argv))()
+        assert received == [tmp_path]
+
+    def test_refused_for_the_replay_backend(self, tmp_path: Path) -> None:
+        args = parse(
+            ["--backend", "replay", "--archive", "x.json", "--archive-dir", str(tmp_path)]
+        )
+        with pytest.raises(SystemExit, match="archive-dir"):
+            session_factory_from_args(args)

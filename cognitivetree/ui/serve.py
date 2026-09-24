@@ -140,6 +140,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="run archive to re-stream; required by the 'replay' backend",
     )
     parser.add_argument(
+        "--archive-dir",
+        type=Path,
+        help=(
+            "save every finished run to this directory as an archive that "
+            "--backend replay can reopen (default: no archiving)"
+        ),
+    )
+    parser.add_argument(
         "--replay-speed",
         type=float,
         default=None,
@@ -191,6 +199,9 @@ def session_factory_from_args(args: argparse.Namespace) -> SessionFactory:
             "(use --backend llm or llm-demo)"
         )
 
+    if args.backend == "replay" and args.archive_dir is not None:
+        raise SystemExit("--archive-dir records live runs; the replay backend has none")
+
     if args.backend == "replay":
         from cognitivetree.persistence import ArchiveFormatError, ReplaySession, load_run
 
@@ -206,7 +217,9 @@ def session_factory_from_args(args: argparse.Namespace) -> SessionFactory:
 
     if args.backend == "reference":
         return lambda: build_reference_session(
-            max_wall_seconds=args.max_seconds, evaluation_workers=args.eval_workers
+            max_wall_seconds=args.max_seconds,
+            evaluation_workers=args.eval_workers,
+            archive_dir=args.archive_dir,
         )
     if args.backend == "llm-demo":
         from cognitivetree.llm.demo import build_offline_session
@@ -215,6 +228,7 @@ def session_factory_from_args(args: argparse.Namespace) -> SessionFactory:
             max_wall_seconds=args.max_seconds,
             max_tokens=args.max_tokens,
             evaluation_workers=args.eval_workers,
+            archive_dir=args.archive_dir,
         )
     missing = [
         name
@@ -267,7 +281,9 @@ def session_factory_from_args(args: argparse.Namespace) -> SessionFactory:
         )
 
     def factory() -> ReasoningSession:
-        return build_llm_session(spec, completion_cache=completion_cache)
+        return build_llm_session(
+            spec, completion_cache=completion_cache, archive_dir=args.archive_dir
+        )
 
     return factory
 
