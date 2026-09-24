@@ -4,7 +4,13 @@ import threading
 
 import pytest
 
-from cognitivetree.llm import CachingLlmClient, LlmClient, LlmError, ScriptedLlmClient
+from cognitivetree.llm import (
+    CachingLlmClient,
+    CompletionCache,
+    LlmClient,
+    LlmError,
+    ScriptedLlmClient,
+)
 from cognitivetree.llm.client import ChatMessage, CompletionRequest
 from cognitivetree.observability import AccountingLlmClient
 
@@ -34,8 +40,8 @@ def test_identical_deterministic_request_is_served_from_cache() -> None:
     assert second.text == first.text == "answer to prompt"
     assert first.prompt_tokens > 0
     assert (second.prompt_tokens, second.completion_tokens) == (0, 0)
-    assert client.stats.hits == 1
-    assert client.stats.misses == 1
+    assert client.cache.stats.hits == 1
+    assert client.cache.stats.misses == 1
 
 
 @pytest.mark.parametrize(
@@ -68,7 +74,7 @@ def test_sampled_requests_bypass_the_cache_by_default() -> None:
     for _ in range(3):
         client.complete(request(temperature=0.7))
     assert len(backend.requests) == 3
-    assert client.stats.hits == client.stats.misses == 0
+    assert client.cache.stats.hits == client.cache.stats.misses == 0
 
 
 def test_sampled_requests_are_cached_when_opted_in() -> None:
@@ -77,18 +83,18 @@ def test_sampled_requests_are_cached_when_opted_in() -> None:
     for _ in range(3):
         client.complete(request(temperature=0.7))
     assert len(backend.requests) == 1
-    assert client.stats.hits == 2
+    assert client.cache.stats.hits == 2
 
 
 def test_least_recently_used_entry_is_evicted() -> None:
     backend = echo_backend()
-    client = CachingLlmClient(backend, max_entries=2)
+    client = CachingLlmClient(backend, CompletionCache(max_entries=2))
     client.complete(request("a"))
     client.complete(request("b"))
     client.complete(request("a"))  # refreshes "a", leaving "b" as the oldest
     client.complete(request("c"))  # evicts "b"
 
-    assert client.stats.entries == 2
+    assert client.cache.stats.entries == 2
     client.complete(request("a"))
     assert len(backend.requests) == 3
     client.complete(request("b"))
@@ -133,9 +139,9 @@ def test_clear_drops_entries_but_keeps_counters() -> None:
     client = CachingLlmClient(echo_backend())
     client.complete(request())
     client.complete(request())
-    client.clear()
+    client.cache.clear()
 
-    stats = client.stats
+    stats = client.cache.stats
     assert stats.entries == 0
     assert (stats.hits, stats.misses) == (1, 1)
     assert stats.hit_rate == 0.5
@@ -155,11 +161,25 @@ def test_concurrent_lookups_keep_consistent_counters() -> None:
     for thread in threads:
         thread.join()
 
-    assert client.stats.hits == 1600
-    assert client.stats.misses == 1
+    assert client.cache.stats.hits == 1600
+    assert client.cache.stats.misses == 1
 
 
 def test_satisfies_the_client_protocol_and_validates_capacity() -> None:
     assert isinstance(CachingLlmClient(echo_backend()), LlmClient)
     with pytest.raises(ValueError):
-        CachingLlmClient(echo_backend(), max_entries=0)
+        CompletionCache(max_entries=0)
+
+
+def test_clients_sharing_a_store_reuse_each_other_completions() -> None:
+    store = CompletionCache()
+    backend = echo_backend()
+    first = AccountingLlmClient(backend)
+    second = AccountingLlmClient(backend)
+    CachingLlmClient(first, store).complete(request())
+    CachingLlmClient(second, store).complete(request())
+
+    # One backend call in total, charged to the client that made it.
+    assert len(backend.requests) == 1
+    assert (first.usage.calls, second.usage.calls) == (1, 0)
+    assert store.stats.hits == 1

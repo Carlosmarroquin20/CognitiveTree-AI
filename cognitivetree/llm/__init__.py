@@ -7,7 +7,7 @@ integration surface with the search core is the policy contracts, so the
 adapters remain swappable and unit-testable through injected transports.
 """
 
-from cognitivetree.llm.caching import CacheStats, CachingLlmClient
+from cognitivetree.llm.caching import CacheStats, CachingLlmClient, CompletionCache
 from cognitivetree.llm.client import (
     ChatMessage,
     CompletionRequest,
@@ -24,6 +24,7 @@ __all__ = [
     "CacheStats",
     "CachingLlmClient",
     "ChatMessage",
+    "CompletionCache",
     "CompletionRequest",
     "CompletionResponse",
     "LlmClient",
