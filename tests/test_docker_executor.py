@@ -83,6 +83,13 @@ class TestLiveSandbox:
         assert result.ok, result.stderr
         assert result.stdout.strip() == "sandbox says hello"
 
+    def test_non_latin_output_round_trips(self) -> None:
+        result = self.executor.execute(
+            ExecutionRequest(code="print(input() + ' λ')", stdin="✓\n")
+        )
+        assert result.ok, result.stderr
+        assert result.stdout.strip() == "✓ λ"
+
     def test_network_egress_is_blocked(self) -> None:
         code = (
             "import socket\n"

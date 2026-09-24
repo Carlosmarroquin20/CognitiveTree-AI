@@ -28,7 +28,10 @@ class SubprocessExecutor:
 
     ``python -I`` detaches the child from user site-packages and environment
     variables, which keeps runs reproducible but must not be mistaken for a
-    security boundary.
+    security boundary. ``-X utf8`` pins the child's standard streams to UTF-8:
+    on a host whose locale encoding is narrower (cp1252 on most Windows
+    installs), a correct payload printing a non-Latin character would
+    otherwise crash on output and be graded as a failure.
     """
 
     def __init__(
@@ -42,14 +45,15 @@ class SubprocessExecutor:
     def execute(self, request: ExecutionRequest) -> ExecutionResult:
         """Executes ``request`` in a child process under the configured deadline."""
         timeout = request.timeout_seconds or self._limits.timeout_seconds
-        command = [self._python, "-I", "-c", request.code]
+        command = [self._python, "-X", "utf8", "-I", "-c", request.code]
         started = perf_counter()
         try:
             completed = subprocess.run(
                 command,
                 input=request.stdin,
                 capture_output=True,
-                text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=timeout,
             )
         except subprocess.TimeoutExpired as exc:

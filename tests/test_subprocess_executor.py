@@ -43,6 +43,24 @@ def test_stdin_reaches_the_payload() -> None:
     assert result.stdout.strip() == "QUIET"
 
 
+def test_non_latin_output_survives_any_host_locale() -> None:
+    # Under a cp1252 locale the child used to crash on this print, turning a
+    # correct payload into a graded failure.
+    result = SubprocessExecutor().execute(
+        ExecutionRequest(code="print('café ✓ λ')")
+    )
+    assert result.ok, result.stderr
+    assert result.stdout.strip() == "café ✓ λ"
+
+
+def test_non_latin_stdin_reaches_the_payload() -> None:
+    result = SubprocessExecutor().execute(
+        ExecutionRequest(code="print(input()[::-1])", stdin="α✓\n")
+    )
+    assert result.ok, result.stderr
+    assert result.stdout.strip() == "✓α"
+
+
 def test_timeout_kills_the_payload() -> None:
     executor = SubprocessExecutor(limits=ResourceLimits(timeout_seconds=1.0))
     result = executor.execute(ExecutionRequest(code="while True: pass"))

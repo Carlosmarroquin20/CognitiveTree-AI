@@ -101,9 +101,13 @@ class DockerSandboxExecutor:
         try:
             completed = subprocess.run(
                 command,
-                input=request.stdin,
+                # Streams cross as raw UTF-8 bytes, matching the image's locale.
+                # Text mode would apply the host's conventions instead: its
+                # locale encoding, and on Windows a CRLF translation that
+                # leaves a stray carriage return on every line the Linux
+                # payload reads.
+                input=request.stdin.encode("utf-8"),
                 capture_output=True,
-                text=True,
                 timeout=timeout + self._config.kill_grace_seconds,
             )
         except FileNotFoundError as exc:
@@ -120,8 +124,12 @@ class DockerSandboxExecutor:
             )
 
         duration = perf_counter() - started
-        stdout, out_clipped = clip_output(completed.stdout, limits.output_limit_chars)
-        stderr, err_clipped = clip_output(completed.stderr, limits.output_limit_chars)
+        stdout, out_clipped = clip_output(
+            completed.stdout.decode("utf-8", errors="replace"), limits.output_limit_chars
+        )
+        stderr, err_clipped = clip_output(
+            completed.stderr.decode("utf-8", errors="replace"), limits.output_limit_chars
+        )
 
         if completed.returncode >= _DOCKER_CLI_ERROR and _is_cli_fault(
             completed.returncode, stderr
