@@ -35,7 +35,7 @@ from cognitivetree.llm.generator import LlmThoughtGenerator
 from cognitivetree.llm.openai_compatible import OpenAICompatibleClient
 from cognitivetree.observability.accounting import AccountingLlmClient
 from cognitivetree.observability.budget import TokenBudget
-from cognitivetree.observability.metrics import RunMetrics
+from cognitivetree.observability.metrics import RunMetrics, TokenUsage
 from cognitivetree.persistence.archive import save_run
 from cognitivetree.policies import Critic
 from cognitivetree.sandbox.evaluation import CodeExecutionEvaluator
@@ -50,6 +50,7 @@ from cognitivetree.ui.events import (
 
 EventSink = Callable[[SearchEvent], None]
 ControllerFactory = Callable[[EventSink | None], TreeSearchController]
+UsageSource = Callable[[], TokenUsage]
 
 _SNAPSHOT_PHASES = frozenset({SearchPhase.BACKPROPAGATION}) | TERMINAL_PHASES
 
@@ -68,6 +69,13 @@ class ReasoningSession:
     reopen. A run that could not be archived still returns its result: the
     write failure is logged rather than raised, since losing the archive is
     better than losing the run.
+
+    ``usage`` reports the cumulative token tally of the session's client.
+    Each run's metrics carry the difference across that run, so streamed
+    metrics and archives include token consumption. Runs executing
+    concurrently on one session share the tally, which blurs the split
+    between them; the server avoids this by building a session per
+    connection.
     """
 
     def __init__(
@@ -75,12 +83,14 @@ class ReasoningSession:
         task: str,
         controller_factory: ControllerFactory,
         archive_dir: str | Path | None = None,
+        usage: UsageSource | None = None,
     ) -> None:
         if not task.strip():
             raise ValueError("task must be a non-empty statement")
         self._task = task
         self._factory = controller_factory
         self._archive_dir = Path(archive_dir) if archive_dir is not None else None
+        self._usage = usage
 
     @property
     def task(self) -> str:
@@ -88,8 +98,9 @@ class ReasoningSession:
 
     def run(self) -> SearchResult:
         """Executes the task synchronously without event streaming."""
+        baseline = self._usage() if self._usage is not None else None
         result = self._factory(None).run(self._task)
-        self._archive(result, RunMetrics.from_result(result))
+        self._archive(result, self._metrics(result, baseline))
         return result
 
     def stream(self) -> Iterator[dict[str, Any]]:
@@ -122,8 +133,9 @@ class ReasoningSession:
 
         def work() -> None:
             try:
+                baseline = self._usage() if self._usage is not None else None
                 result = controller.run(self._task, cancel_event=cancel)
-                metrics = RunMetrics.from_result(result)
+                metrics = self._metrics(result, baseline)
                 self._archive(result, metrics)
                 envelopes.put(metrics_envelope(metrics.to_dict()))
                 envelopes.put(result_envelope(result))
@@ -146,6 +158,15 @@ class ReasoningSession:
             if not finished:
                 cancel.set()
         worker.join(timeout=10.0)
+
+    def _metrics(self, result: SearchResult, baseline: TokenUsage | None) -> RunMetrics:
+        """Summarizes ``result`` with the tokens consumed since ``baseline``."""
+        spent = (
+            self._usage() - baseline
+            if self._usage is not None and baseline is not None
+            else None
+        )
+        return RunMetrics.from_result(result, token_usage=spent)
 
     def _archive(self, result: SearchResult, metrics: RunMetrics) -> Path | None:
         """Saves ``result`` under the archive directory, when one is set.
@@ -280,12 +301,13 @@ def build_llm_session(
     drive the full assembly offline; ``spec.base_url`` and ``spec.model`` are
     ignored in that case.
 
-    When the spec sets a consumption ceiling, the client is wrapped for
-    accounting and the resulting tally becomes the run's stop condition. An
-    already-accounting client is reused rather than double-wrapped, so its
-    caller keeps a handle on the same totals the budget enforces. Each run
-    receives a fresh budget, so the ceiling applies per run even though the
-    client's totals keep accumulating across a reused session.
+    The client is always wrapped for accounting, which feeds each run's token
+    usage into its metrics and, when the spec sets a consumption ceiling,
+    becomes the run's stop condition. An already-accounting client is reused
+    rather than double-wrapped, so its caller keeps a handle on the same
+    totals the budget enforces. Each run receives a fresh budget, so the
+    ceiling applies per run even though the client's totals keep
+    accumulating across a reused session.
 
     With ``spec.cache_completions`` the cache sits outside the accounting
     layer, so budgets count only real backend calls and tokens.
@@ -300,11 +322,11 @@ def build_llm_session(
             base_url=spec.base_url, model=spec.model, api_key=spec.api_key
         )
 
-    accounting: AccountingLlmClient | None = None
-    if spec.max_tokens is not None or spec.max_llm_calls is not None:
-        if not isinstance(client, AccountingLlmClient):
-            client = AccountingLlmClient(client)
-        accounting = client
+    # Always accounted: the wrapper is transparent and cheap, and it is what
+    # puts token usage into streamed metrics and archives.
+    accounting = client if isinstance(client, AccountingLlmClient) else AccountingLlmClient(client)
+    client = accounting
+    budgeted = spec.max_tokens is not None or spec.max_llm_calls is not None
     if spec.cache_completions:
         client = CachingLlmClient(client, completion_cache)
 
@@ -326,7 +348,7 @@ def build_llm_session(
                 max_total_tokens=spec.max_tokens,
                 max_calls=spec.max_llm_calls,
             )
-            if accounting is not None
+            if budgeted
             else None
         )
         return TreeSearchController(
@@ -343,5 +365,8 @@ def build_llm_session(
         )
 
     return ReasoningSession(
-        task=spec.task, controller_factory=factory, archive_dir=archive_dir
+        task=spec.task,
+        controller_factory=factory,
+        archive_dir=archive_dir,
+        usage=lambda: accounting.usage,
     )

@@ -24,6 +24,14 @@ class TokenUsage:
     def total_tokens(self) -> int:
         return self.prompt_tokens + self.completion_tokens
 
+    def __sub__(self, earlier: TokenUsage) -> TokenUsage:
+        """Returns the consumption between ``earlier`` and this tally."""
+        return TokenUsage(
+            calls=self.calls - earlier.calls,
+            prompt_tokens=self.prompt_tokens - earlier.prompt_tokens,
+            completion_tokens=self.completion_tokens - earlier.completion_tokens,
+        )
+
     def to_dict(self) -> dict[str, int]:
         return {
             "calls": self.calls,

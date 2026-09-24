@@ -187,3 +187,34 @@ class TestCompletionCaching:
 
         assert len(backend.requests) == 2
         assert store.stats.hits == 2
+
+
+class TestPerRunTokenUsage:
+    """Session metrics carry the tokens each run consumed."""
+
+    def test_streamed_metrics_report_tokens(self) -> None:
+        envelopes = list(build_offline_session().stream())
+        (metrics,) = [e["metrics"] for e in envelopes if e["type"] == "metrics"]
+        assert metrics["token_usage"]["calls"] == 2
+        assert metrics["token_usage"]["total_tokens"] > 0
+
+    def test_each_run_reports_only_its_own_consumption(self, tmp_path) -> None:
+        session = build_llm_session(
+            _offline_spec(), client=ScriptedLlmClient(clamp_responder), archive_dir=tmp_path
+        )
+        session.run()
+        session.run()
+
+        from cognitivetree.persistence import load_run
+
+        usages = [load_run(p).metrics["token_usage"] for p in sorted(tmp_path.glob("*.json"))]
+        assert len(usages) == 2
+        assert usages[0] == usages[1]
+        assert usages[0]["calls"] == 2
+
+    def test_model_free_reference_session_reports_no_tokens(self) -> None:
+        from cognitivetree.session import build_reference_session
+
+        envelopes = list(build_reference_session().stream())
+        (metrics,) = [e["metrics"] for e in envelopes if e["type"] == "metrics"]
+        assert metrics["token_usage"] is None

@@ -155,15 +155,18 @@ def build_offline_session(
     """
     from cognitivetree.session import ReasoningSession
 
+    client = AccountingLlmClient(ScriptedLlmClient(clamp_responder, model="scripted-llama"))
     return ReasoningSession(
         task=TASK,
         controller_factory=lambda sink: build_offline_controller(
+            client=client,
             on_event=sink,
             max_wall_seconds=max_wall_seconds,
             max_tokens=max_tokens,
             evaluation_workers=evaluation_workers,
         ),
         archive_dir=archive_dir,
+        usage=lambda: client.usage,
     )
 
 

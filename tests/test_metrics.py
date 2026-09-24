@@ -92,3 +92,13 @@ def test_empty_token_usage_still_reports() -> None:
     metrics = RunMetrics.from_result(result, token_usage=TokenUsage())
     assert metrics.token_usage is not None
     assert "0" in metrics.format_report()
+
+
+def test_token_usage_difference_is_the_consumption_in_between() -> None:
+    from cognitivetree.observability import TokenUsage
+
+    later = TokenUsage(calls=5, prompt_tokens=300, completion_tokens=80)
+    earlier = TokenUsage(calls=2, prompt_tokens=100, completion_tokens=30)
+    spent = later - earlier
+    assert spent == TokenUsage(calls=3, prompt_tokens=200, completion_tokens=50)
+    assert spent.total_tokens == 250

@@ -48,9 +48,8 @@ class TokenBudget:
 
     def check(self) -> str | None:
         """Returns why the run must stop, or ``None`` to let it continue."""
-        usage = self._client.usage
-        tokens = usage.total_tokens - self._baseline.total_tokens
-        calls = usage.calls - self._baseline.calls
+        spent = self._client.usage - self._baseline
+        tokens, calls = spent.total_tokens, spent.calls
         if self._max_total_tokens is not None and tokens >= self._max_total_tokens:
             return (
                 f"token budget of {self._max_total_tokens} exhausted: "
