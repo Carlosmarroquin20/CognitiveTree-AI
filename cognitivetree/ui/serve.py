@@ -27,6 +27,7 @@ from pathlib import Path
 
 from cognitivetree.config import SearchConfig
 from cognitivetree.llm.caching import CompletionCache
+from cognitivetree.observability.logs import LOG_FORMATS, configure_logging
 from cognitivetree.session import (
     LlmSessionSpec,
     ReasoningSession,
@@ -166,6 +167,12 @@ def build_parser() -> argparse.ArgumentParser:
         ),
     )
     parser.add_argument("--verbose", action="store_true", help="debug logging")
+    parser.add_argument(
+        "--log-format",
+        choices=LOG_FORMATS,
+        default="text",
+        help="text for terminals; json emits one object per line for log collectors",
+    )
     return parser
 
 
@@ -308,9 +315,9 @@ def is_loopback_host(host: str) -> bool:
 def main(argv: list[str] | None = None) -> None:
     """Parses arguments and serves until interrupted."""
     args = build_parser().parse_args(argv)
-    logging.basicConfig(
+    configure_logging(
         level=logging.DEBUG if args.verbose else logging.INFO,
-        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+        log_format=args.log_format,
     )
     if not is_loopback_host(args.host):
         # Every /stream request starts a run that executes generated code, so

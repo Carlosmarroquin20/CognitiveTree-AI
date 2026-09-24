@@ -275,6 +275,7 @@ backend, which runs no model and would silently never fire them.
 | `cognitivetree/observability/metrics.py` | `RunMetrics` / `TokenUsage`: post-hoc run summary projected from the result |
 | `cognitivetree/observability/accounting.py` | `AccountingLlmClient`: transparent token/call tallying wrapper |
 | `cognitivetree/observability/budget.py` | `TokenBudget`: the same tally used as a `StopCondition` |
+| `cognitivetree/observability/logs.py` | `JsonLogFormatter` / `configure_logging`: text or one-JSON-object-per-line log output |
 | `cognitivetree/persistence/archive.py` | Versioned JSON run archives: `save_run` / `load_run`, rehydrated into a real `SearchResult` |
 | `cognitivetree/persistence/replay.py` | `ReplaySession`: re-streams an archive through the live envelope vocabulary |
 | `cognitivetree/persistence/demo.py` | Archive a timed-out run, discard it, reopen and diagnose it offline |
@@ -432,6 +433,19 @@ run metrics
   node status        : pending=1, terminal=1, pruned=3
   phase time (ms)    : evaluation=938.0, selection=15.0
   llm tokens         : 430 (346 prompt + 84 completion) across 2 calls
+```
+
+### Structured logs
+
+`--log-format json` makes the server emit one JSON object per line on
+stderr, ready for a log collector. Every object carries `ts` (UTC),
+`level`, `logger`, and `message`, plus any fields passed through logging's
+standard `extra` mapping, so library code keeps using plain `logging` calls.
+`configure_logging` and `JsonLogFormatter` are exported for embedding
+applications that own their process.
+
+```json
+{"ts": "2026-09-24T21:57:20.630+00:00", "level": "warning", "logger": "cognitivetree.ui.serve", "message": "binding to 0.0.0.0 exposes an unauthenticated endpoint ..."}
 ```
 
 ## Benchmarking

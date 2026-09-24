@@ -11,6 +11,14 @@ controller can act on.
 
 from cognitivetree.observability.accounting import AccountingLlmClient
 from cognitivetree.observability.budget import TokenBudget
+from cognitivetree.observability.logs import JsonLogFormatter, configure_logging
 from cognitivetree.observability.metrics import RunMetrics, TokenUsage
 
-__all__ = ["AccountingLlmClient", "RunMetrics", "TokenBudget", "TokenUsage"]
+__all__ = [
+    "AccountingLlmClient",
+    "JsonLogFormatter",
+    "RunMetrics",
+    "TokenBudget",
+    "TokenUsage",
+    "configure_logging",
+]
