@@ -66,8 +66,9 @@ class _Handler(BaseHTTPRequestHandler):
     def _serve_stream(self) -> None:
         """Runs a fresh session and streams its envelopes until completion.
 
-        Each connection gets its own run; a disconnect stops the transmission
-        while the worker thread drains the remaining envelopes and finishes.
+        Each connection gets its own run. A disconnect closes the session's
+        stream, which a live session treats as cancellation: its run stops at
+        the next iteration boundary instead of finishing for no one.
         A request beyond the server's concurrency cap is refused with 503
         before any session is built.
         """
@@ -88,12 +89,19 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Cache-Control", "no-cache")
         self.send_header("Connection", "close")
         self.end_headers()
+        envelopes = session.stream()
         try:
-            for envelope in session.stream():
+            for envelope in envelopes:
                 self.wfile.write(format_sse(envelope))
                 self.wfile.flush()
         except _CLIENT_DISCONNECTS:
             logger.info("stream client disconnected mid-run")
+        finally:
+            # Closes generator-based streams now rather than at garbage
+            # collection, so an abandoned run is cancelled without delay.
+            close = getattr(envelopes, "close", None)
+            if close is not None:
+                close()
 
     def _refuse_busy(self) -> None:
         body = b"concurrent run limit reached; retry shortly\n"

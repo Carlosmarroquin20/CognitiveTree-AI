@@ -359,7 +359,10 @@ when no GPU or endpoint is available.
 
 `ReasoningSession.stream()` runs the search on a worker thread and yields
 JSON envelopes in order; the SSE server maps them 1:1 onto `EventSource`
-events. Each `/stream` connection triggers an independent run.
+events. Each `/stream` connection triggers an independent run, and a client
+that disconnects cancels it: the run stops at its next iteration boundary in
+the `cancelled` phase instead of spending model quota and sandbox time for no
+one. `--max-concurrent-runs` (default 4) bounds how many run at once.
 
 | SSE event | Payload | Emitted |
 |-----------|---------|---------|

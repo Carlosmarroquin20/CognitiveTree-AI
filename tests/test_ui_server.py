@@ -7,8 +7,10 @@ from collections.abc import Iterator
 from typing import Any
 
 import pytest
+from conftest import EndlessRun
 
-from cognitivetree.session import build_reference_session
+from cognitivetree.session import ReasoningSession, build_reference_session
+from cognitivetree.state import SearchPhase
 from cognitivetree.ui.events import format_sse
 from cognitivetree.ui.server import StreamingUiServer
 
@@ -165,3 +167,29 @@ def test_streams_beyond_the_concurrency_cap_are_refused() -> None:
 def test_concurrency_cap_must_be_positive() -> None:
     with pytest.raises(ValueError):
         StreamingUiServer(("127.0.0.1", 0), build_reference_session, max_concurrent_runs=0)
+
+
+def test_disconnecting_client_cancels_the_live_run(endless_run: EndlessRun) -> None:
+    run = endless_run
+    server = StreamingUiServer(
+        ("127.0.0.1", 0), lambda: ReasoningSession("endless", run.factory)
+    )
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        connection, response = open_stream(server.server_address[1])
+        assert response.status == 200
+        response.readline()
+        # The response holds its own reference to the socket, so both must
+        # close before the server can observe the disconnect.
+        response.close()
+        connection.close()
+
+        # The next envelope written to the closed socket fails, the handler
+        # closes the stream, and the run stops at its following boundary.
+        assert run.settled.wait(timeout=15)
+        assert run.terminal is SearchPhase.CANCELLED
+    finally:
+        server.shutdown()
+        server.server_close()
+        thread.join(timeout=5)

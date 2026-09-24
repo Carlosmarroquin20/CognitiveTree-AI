@@ -1,9 +1,11 @@
 """Validates session lifecycle and the streamed envelope contract."""
 
 import pytest
+from conftest import EndlessRun
 
 from cognitivetree.search import SearchOutcome
 from cognitivetree.session import ReasoningSession, build_reference_session
+from cognitivetree.state import SearchPhase
 
 
 def test_reference_session_runs_to_success() -> None:
@@ -59,3 +61,21 @@ def test_stream_and_run_are_independent_executions() -> None:
 def test_blank_task_is_rejected() -> None:
     with pytest.raises(ValueError):
         ReasoningSession(task="  ", controller_factory=lambda sink: None)
+
+
+def test_abandoned_stream_cancels_its_run(endless_run: EndlessRun) -> None:
+    run = endless_run
+    stream = ReasoningSession("endless", run.factory).stream()
+    for _ in range(5):
+        next(stream)
+    stream.close()
+
+    assert run.settled.wait(timeout=10)
+    assert run.terminal is SearchPhase.CANCELLED
+    assert run.generated < 1_000
+
+
+def test_fully_consumed_stream_is_never_cancelled() -> None:
+    envelopes = list(build_reference_session().stream())
+    assert envelopes[-1]["outcome"] == "succeeded"
+    assert "cancelled" not in [e.get("phase") for e in envelopes]

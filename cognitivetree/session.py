@@ -78,8 +78,15 @@ class ReasoningSession:
         closing ``result`` envelope. Envelope production happens on the worker
         thread; this generator only drains the queue, so consumers may block
         freely (as an SSE connection does) without stalling the search.
+
+        Closing the generator before the ``result`` envelope cancels the run:
+        a consumer that stops reading has no use for the rest of it, and
+        letting it continue would keep spending model quota and sandbox time.
+        The run stops at its next iteration boundary, in the ``cancelled``
+        phase, without this generator waiting for it.
         """
         envelopes: queue.Queue[dict[str, Any] | None] = queue.Queue()
+        cancel = threading.Event()
         controller: TreeSearchController | None = None
 
         def sink(event: SearchEvent) -> None:
@@ -93,7 +100,7 @@ class ReasoningSession:
 
         def work() -> None:
             try:
-                result = controller.run(self._task)
+                result = controller.run(self._task, cancel_event=cancel)
                 metrics = RunMetrics.from_result(result)
                 envelopes.put(metrics_envelope(metrics.to_dict()))
                 envelopes.put(result_envelope(result))
@@ -104,11 +111,17 @@ class ReasoningSession:
             target=work, name="cognitivetree-session", daemon=True
         )
         worker.start()
-        while True:
-            envelope = envelopes.get()
-            if envelope is None:
-                break
-            yield envelope
+        finished = False
+        try:
+            while True:
+                envelope = envelopes.get()
+                if envelope is None:
+                    finished = True
+                    break
+                yield envelope
+        finally:
+            if not finished:
+                cancel.set()
         worker.join(timeout=10.0)
 
 
