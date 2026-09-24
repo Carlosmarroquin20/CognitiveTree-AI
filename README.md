@@ -736,3 +736,7 @@ requires.
   diagnosis possible are the same ones that would bloat a UI snapshot
   re-serialized on every backpropagation, so the two callers choose
   independently rather than sharing one compromise.
+
+## License
+
+Released under the [MIT License](LICENSE).
