@@ -75,6 +75,18 @@ def build_parser() -> argparse.ArgumentParser:
         help="file with validation assertions appended to every payload",
     )
     parser.add_argument(
+        "--temperature",
+        type=float,
+        default=0.7,
+        help="generator sampling temperature; 0 makes expansion deterministic (default: 0.7)",
+    )
+    parser.add_argument(
+        "--critic-temperature",
+        type=float,
+        default=0.2,
+        help="LLM critic sampling temperature, used with --llm-critic (default: 0.2)",
+    )
+    parser.add_argument(
         "--llm-critic",
         action="store_true",
         help="chain an LLM critic behind the execution-trace critic",
@@ -152,6 +164,12 @@ def session_factory_from_args(args: argparse.Namespace) -> SessionFactory:
         raise SystemExit("--max-llm-calls must be a positive integer")
     if args.eval_workers < 1:
         raise SystemExit("--eval-workers must be a positive integer")
+    for flag, value in (
+        ("--temperature", args.temperature),
+        ("--critic-temperature", args.critic_temperature),
+    ):
+        if not 0.0 <= value <= 2.0:
+            raise SystemExit(f"{flag} must lie within [0.0, 2.0]")
     if args.max_concurrent_runs < 1:
         raise SystemExit("--max-concurrent-runs must be a positive integer")
     if args.backend == "reference" and (
@@ -216,6 +234,8 @@ def session_factory_from_args(args: argparse.Namespace) -> SessionFactory:
         model=args.model,
         validation_harness=harness,
         api_key=api_key,
+        temperature=args.temperature,
+        critic_temperature=args.critic_temperature,
         use_llm_critic=args.llm_critic,
         config=SearchConfig(
             seed=None,

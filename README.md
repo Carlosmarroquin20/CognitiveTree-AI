@@ -321,6 +321,10 @@ Endpoints that require authentication read the bearer token from the
 a warning, because command-line arguments are visible in shell history and
 process listings.
 
+`--temperature` (default `0.7`) and `--critic-temperature` (default `0.2`)
+set the sampling temperature of the generator and the LLM critic. `0` makes a
+role deterministic, which reproducible runs and completion caching need.
+
 `--max-seconds` maps to `SearchConfig.max_wall_seconds` and is honored by all
 three backends (`reference`, `llm-demo`, `llm`) — see **Global Time Budget**
 above.

@@ -184,6 +184,10 @@ class LlmSessionSpec:
         validation_harness: Assertions appended to every extracted payload.
         api_key: Bearer token when the endpoint requires one.
         temperature: Sampling temperature for the generator.
+        critic_temperature: Sampling temperature for the LLM critic. Both
+            default to the values the policies were tuned with; ``0`` makes
+            a role deterministic, which reproducible runs and completion
+            caching both need.
         use_llm_critic: Chains an LLM critic behind the execution-trace
             critic for failures the traceback cannot explain.
         config: Search parameters for the run.
@@ -200,11 +204,19 @@ class LlmSessionSpec:
     validation_harness: str = ""
     api_key: str | None = None
     temperature: float = 0.7
+    critic_temperature: float = 0.2
     use_llm_critic: bool = False
     config: SearchConfig = SearchConfig(seed=None)
     revision_attempts: int = 1
     max_tokens: int | None = None
     max_llm_calls: int | None = None
+
+    def __post_init__(self) -> None:
+        # Validated here so a bad value fails at startup; the completion
+        # request would otherwise reject it on the first call, mid-run.
+        for name in ("temperature", "critic_temperature"):
+            if not 0.0 <= getattr(self, name) <= 2.0:
+                raise ValueError(f"{name} must lie within [0.0, 2.0]")
 
 
 def build_llm_session(
@@ -241,7 +253,12 @@ def build_llm_session(
 
     critic: Critic = ExecutionTraceCritic()
     if spec.use_llm_critic:
-        critic = ChainedCritic([ExecutionTraceCritic(), LlmCritic(client)])
+        critic = ChainedCritic(
+            [
+                ExecutionTraceCritic(),
+                LlmCritic(client, temperature=spec.critic_temperature),
+            ]
+        )
 
     def factory(sink: EventSink | None) -> TreeSearchController:
         stop_condition = (

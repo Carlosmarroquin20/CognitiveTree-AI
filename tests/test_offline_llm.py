@@ -1,5 +1,7 @@
 """End-to-end validation of the LLM adapter stack driven offline."""
 
+import pytest
+
 from cognitivetree.config import SearchConfig
 from cognitivetree.feedback.demo import BROKEN_WAVE, REVISED_CANDIDATE
 from cognitivetree.llm.client import ChatMessage, CompletionRequest
@@ -110,3 +112,32 @@ def test_chained_llm_critic_path_still_succeeds() -> None:
     # LLM critic is present but not consulted; the run must still converge.
     result = build_offline_controller(use_llm_critic=True).run(TASK)
     assert result.outcome is SearchOutcome.SUCCEEDED
+
+
+def _offline_spec(**overrides: object) -> LlmSessionSpec:
+    params: dict[str, object] = {
+        "task": TASK,
+        "base_url": "unused://offline",
+        "model": "scripted",
+        "validation_harness": VALIDATION_HARNESS,
+        "config": SearchConfig(max_iterations=16, max_depth=1, branching_factor=3, seed=7),
+    }
+    params.update(overrides)
+    return LlmSessionSpec(**params)  # type: ignore[arg-type]
+
+
+def test_temperatures_reach_the_generator_and_critic() -> None:
+    client = ScriptedLlmClient(clamp_responder)
+    spec = _offline_spec(temperature=0.0, critic_temperature=0.0, use_llm_critic=True)
+    session = build_llm_session(spec, client=client)
+    session.run()
+
+    assert {r.temperature for r in client.requests} == {0.0}
+    critics = session._factory(None)._critic._critics  # type: ignore[union-attr]
+    assert critics[-1]._temperature == 0.0
+
+
+@pytest.mark.parametrize("field", ["temperature", "critic_temperature"])
+def test_spec_rejects_out_of_range_temperatures(field: str) -> None:
+    with pytest.raises(ValueError, match=field):
+        _offline_spec(**{field: 2.5})

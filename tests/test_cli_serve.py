@@ -314,3 +314,24 @@ def test_concurrent_runs_are_capped_by_default() -> None:
 def test_non_positive_concurrency_cap_is_rejected() -> None:
     with pytest.raises(SystemExit, match="max-concurrent-runs"):
         session_factory_from_args(parse(["--max-concurrent-runs", "0"]))
+
+
+class TestTemperatures:
+    """Sampling temperatures travel from the CLI into the session spec."""
+
+    def test_defaults_match_the_tuned_policy_values(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        spec = TestApiKey().captured_spec(monkeypatch, TestApiKey.ARGS)
+        assert (spec.temperature, spec.critic_temperature) == (0.7, 0.2)
+
+    def test_flags_reach_the_spec(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        argv = [*TestApiKey.ARGS, "--temperature", "0", "--critic-temperature", "0"]
+        spec = TestApiKey().captured_spec(monkeypatch, argv)
+        assert (spec.temperature, spec.critic_temperature) == (0.0, 0.0)
+
+    @pytest.mark.parametrize("flag", ["--temperature", "--critic-temperature"])
+    @pytest.mark.parametrize("value", ["-0.1", "2.5"])
+    def test_out_of_range_values_are_rejected(self, flag: str, value: str) -> None:
+        with pytest.raises(SystemExit, match=flag):
+            session_factory_from_args(parse([*TestApiKey.ARGS, flag, value]))
