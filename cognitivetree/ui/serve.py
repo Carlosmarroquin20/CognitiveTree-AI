@@ -20,6 +20,7 @@ Examples:
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import logging
 import os
 from pathlib import Path
@@ -220,6 +221,16 @@ def session_factory_from_args(args: argparse.Namespace) -> SessionFactory:
     return factory
 
 
+def is_loopback_host(host: str) -> bool:
+    """Reports whether ``host`` binds only to the local machine."""
+    if host.lower() == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
 def main(argv: list[str] | None = None) -> None:
     """Parses arguments and serves until interrupted."""
     args = build_parser().parse_args(argv)
@@ -227,6 +238,16 @@ def main(argv: list[str] | None = None) -> None:
         level=logging.DEBUG if args.verbose else logging.INFO,
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
+    if not is_loopback_host(args.host):
+        # Every /stream request starts a run that executes generated code, so
+        # a reachable server lets anyone on the network run code on this host
+        # (without isolation when Docker is unavailable) and spend its quota.
+        logger.warning(
+            "binding to %s exposes an unauthenticated endpoint that executes "
+            "generated code; keep the default 127.0.0.1 unless the network "
+            "is trusted",
+            args.host,
+        )
     server = StreamingUiServer((args.host, args.port), session_factory_from_args(args))
     print(f"CognitiveTree-AI streaming interface: {server.url}")
     print(f"backend: {args.backend} | stream endpoint: {server.url}stream")

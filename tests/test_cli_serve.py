@@ -13,7 +13,12 @@ import pytest
 
 from cognitivetree.session import LlmSessionSpec
 from cognitivetree.ui import serve
-from cognitivetree.ui.serve import API_KEY_ENV_VAR, build_parser, session_factory_from_args
+from cognitivetree.ui.serve import (
+    API_KEY_ENV_VAR,
+    build_parser,
+    is_loopback_host,
+    session_factory_from_args,
+)
 
 
 def parse(argv: list[str]):
@@ -283,3 +288,20 @@ class TestApiKey:
         assert spec.api_key == "flag-token"
         assert API_KEY_ENV_VAR in caplog.text
         assert "flag-token" not in caplog.text
+
+
+@pytest.mark.parametrize(
+    ("host", "loopback"),
+    [
+        ("127.0.0.1", True),
+        ("127.8.0.1", True),
+        ("::1", True),
+        ("localhost", True),
+        ("0.0.0.0", False),
+        ("::", False),
+        ("192.168.1.20", False),
+        ("my-workstation", False),
+    ],
+)
+def test_loopback_detection(host: str, loopback: bool) -> None:
+    assert is_loopback_host(host) is loopback
