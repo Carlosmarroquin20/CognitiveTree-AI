@@ -111,6 +111,27 @@ def test_malformed_body_raises_llm_error() -> None:
         client_with(transport).complete(request())
 
 
+@pytest.mark.parametrize(
+    "usage",
+    [
+        None,
+        {},
+        {"prompt_tokens": None, "completion_tokens": 7},
+        {"prompt_tokens": "n/a", "completion_tokens": 7},
+        [12, 7],
+    ],
+)
+def test_missing_or_malformed_usage_counts_as_zero(usage: object) -> None:
+    body = json.dumps(
+        {"choices": [{"message": {"content": "text"}}], "usage": usage}
+    ).encode()
+    response = client_with(FakeTransport([(200, body)])).complete(request())
+    assert response.text == "text"
+    assert response.prompt_tokens == 0
+    expected_completion = 7 if isinstance(usage, dict) and usage else 0
+    assert response.completion_tokens == expected_completion
+
+
 def test_invalid_construction_is_rejected() -> None:
     with pytest.raises(ValueError):
         OpenAICompatibleClient(base_url=" ", model="m")

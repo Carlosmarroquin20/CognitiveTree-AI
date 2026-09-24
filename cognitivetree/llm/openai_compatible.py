@@ -154,10 +154,22 @@ class OpenAICompatibleClient:
             raise LlmError(f"malformed completion response: {body[:200]!r}") from exc
         if not isinstance(text, str):
             raise LlmError("completion content is not a string")
-        usage = document.get("usage") or {}
+        usage = document.get("usage")
+        if not isinstance(usage, dict):
+            usage = {}
         return CompletionResponse(
             text=text,
             model=str(document.get("model", "")),
-            prompt_tokens=int(usage.get("prompt_tokens", 0)),
-            completion_tokens=int(usage.get("completion_tokens", 0)),
+            prompt_tokens=_token_count(usage.get("prompt_tokens")),
+            completion_tokens=_token_count(usage.get("completion_tokens")),
         )
+
+
+def _token_count(value: Any) -> int:
+    """Reads one usage figure, treating absent or malformed values as zero.
+
+    Usage is accounting, not content: servers that report ``null`` or omit a
+    field (several OpenAI-compatible backends do) must not turn an otherwise
+    valid completion into a failed run.
+    """
+    return value if isinstance(value, int) and value >= 0 else 0
