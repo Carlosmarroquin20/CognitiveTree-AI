@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import urllib.error
 import urllib.request
 from typing import Any, Protocol, runtime_checkable
@@ -24,6 +25,12 @@ from cognitivetree.llm.client import (
 logger = logging.getLogger(__name__)
 
 _RETRYABLE_STATUS_FLOOR = 500
+
+# Rate limiting is transient by definition: local servers such as vLLM and
+# LM Studio answer 429 while their request queue is saturated.
+_TOO_MANY_REQUESTS = 429
+
+_MAX_BACKOFF_SECONDS = 30.0
 
 
 @runtime_checkable
@@ -71,8 +78,11 @@ class UrllibTransport:
 class OpenAICompatibleClient:
     """Implements :class:`~cognitivetree.llm.client.LlmClient` over HTTP.
 
-    Retries are limited to connection failures and 5xx responses; client-side
-    errors (4xx) surface immediately since retrying them cannot succeed.
+    Retries are limited to connection failures, 5xx responses, and 429 rate
+    limiting; other client-side errors (4xx) surface immediately since
+    retrying them cannot succeed. Retries back off exponentially from
+    ``retry_backoff_seconds``, doubling per attempt up to a 30-second cap, so
+    a saturated server is given room to drain instead of being hammered.
     """
 
     def __init__(
@@ -83,6 +93,7 @@ class OpenAICompatibleClient:
         timeout_seconds: float = 120.0,
         max_retries: int = 1,
         transport: HttpJsonTransport | None = None,
+        retry_backoff_seconds: float = 0.5,
     ) -> None:
         if not base_url.strip():
             raise ValueError("base_url must be a non-empty URL")
@@ -92,11 +103,14 @@ class OpenAICompatibleClient:
             raise ValueError("timeout_seconds must be positive")
         if max_retries < 0:
             raise ValueError("max_retries must be non-negative")
+        if retry_backoff_seconds < 0:
+            raise ValueError("retry_backoff_seconds must be non-negative")
         self._endpoint = f"{base_url.rstrip('/')}/chat/completions"
         self._model = model
         self._api_key = api_key
         self._timeout = timeout_seconds
         self._max_retries = max_retries
+        self._retry_backoff = retry_backoff_seconds
         self._transport = transport or UrllibTransport()
 
     def complete(self, request: CompletionRequest) -> CompletionResponse:
@@ -115,6 +129,8 @@ class OpenAICompatibleClient:
 
         last_error: LlmError | None = None
         for attempt in range(self._max_retries + 1):
+            if attempt:
+                self._back_off(attempt)
             try:
                 status, body = self._transport.post(
                     self._endpoint, payload, headers, self._timeout
@@ -128,7 +144,7 @@ class OpenAICompatibleClient:
                     exc,
                 )
                 continue
-            if status >= _RETRYABLE_STATUS_FLOOR:
+            if status >= _RETRYABLE_STATUS_FLOOR or status == _TOO_MANY_REQUESTS:
                 last_error = LlmError(
                     f"backend error HTTP {status}: {body[:200]!r}"
                 )
@@ -144,6 +160,12 @@ class OpenAICompatibleClient:
             return self._parse_response(body)
         assert last_error is not None
         raise last_error
+
+    def _back_off(self, attempt: int) -> None:
+        """Waits before retry number ``attempt``, doubling the delay each time."""
+        delay = min(self._retry_backoff * 2 ** (attempt - 1), _MAX_BACKOFF_SECONDS)
+        if delay > 0:
+            time.sleep(delay)
 
     def _parse_response(self, body: bytes) -> CompletionResponse:
         """Extracts the completion text and usage from a 200 response body."""

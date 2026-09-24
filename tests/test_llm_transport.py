@@ -147,6 +147,7 @@ class TestClientOverRealHttp:
     """The full client stack against an endpoint that speaks the dialect."""
 
     def build(self, server: str, **kwargs: object) -> OpenAICompatibleClient:
+        kwargs.setdefault("retry_backoff_seconds", 0.0)
         return OpenAICompatibleClient(
             base_url=f"{server}/v1", model="llama3.3", **kwargs  # type: ignore[arg-type]
         )
@@ -181,6 +182,14 @@ class TestClientOverRealHttp:
 
     def test_server_error_is_retried_then_succeeds(self, server: str) -> None:
         _SCRIPT["statuses"] = [500, 200]
+        _SCRIPT["body"] = completion_body()
+        response = self.build(server, max_retries=1).complete(request())
+
+        assert response.text == "hello from the model"
+        assert _SCRIPT["calls"] == 2
+
+    def test_rate_limiting_is_retried_then_succeeds(self, server: str) -> None:
+        _SCRIPT["statuses"] = [429, 200]
         _SCRIPT["body"] = completion_body()
         response = self.build(server, max_retries=1).complete(request())
 

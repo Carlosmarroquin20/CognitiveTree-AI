@@ -4,8 +4,17 @@ import json
 
 import pytest
 
+from cognitivetree.llm import openai_compatible
 from cognitivetree.llm.client import ChatMessage, CompletionRequest, LlmError
 from cognitivetree.llm.openai_compatible import OpenAICompatibleClient
+
+
+@pytest.fixture(autouse=True)
+def sleeps(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+    """Records backoff delays instead of waiting them out."""
+    recorded: list[float] = []
+    monkeypatch.setattr(openai_compatible.time, "sleep", recorded.append)
+    return recorded
 
 
 def ok_body(text: str = "completion text") -> bytes:
@@ -98,6 +107,28 @@ def test_connection_error_is_retried_then_raised() -> None:
     assert len(transport.calls) == 2
 
 
+def test_rate_limiting_is_retried_then_succeeds() -> None:
+    transport = FakeTransport([(429, b"queue full"), (200, ok_body())])
+    response = client_with(transport, max_retries=1).complete(request())
+    assert response.text == "completion text"
+    assert len(transport.calls) == 2
+
+
+def test_retries_back_off_exponentially_up_to_the_cap(sleeps: list[float]) -> None:
+    transport = FakeTransport([(503, b"busy")] * 9)
+    with pytest.raises(LlmError, match="503"):
+        client_with(transport, max_retries=8, retry_backoff_seconds=0.5).complete(
+            request()
+        )
+    # No wait precedes the first attempt; each retry doubles until the cap.
+    assert sleeps == [0.5, 1.0, 2.0, 4.0, 8.0, 16.0, 30.0, 30.0]
+
+
+def test_successful_first_attempt_never_waits(sleeps: list[float]) -> None:
+    client_with(FakeTransport([(200, ok_body())])).complete(request())
+    assert sleeps == []
+
+
 def test_client_error_is_not_retried() -> None:
     transport = FakeTransport([(404, b"model not found")])
     with pytest.raises(LlmError, match="404"):
@@ -137,6 +168,8 @@ def test_invalid_construction_is_rejected() -> None:
         OpenAICompatibleClient(base_url=" ", model="m")
     with pytest.raises(ValueError):
         OpenAICompatibleClient(base_url="http://x", model="")
+    with pytest.raises(ValueError):
+        OpenAICompatibleClient(base_url="http://x", model="m", retry_backoff_seconds=-1)
     with pytest.raises(ValueError):
         ChatMessage(role="tool", content="x")
     with pytest.raises(ValueError):
