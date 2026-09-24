@@ -13,6 +13,7 @@ turning failure diagnoses into amended guidance for the generator.
 from __future__ import annotations
 
 import random
+import threading
 import time
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor
@@ -45,6 +46,7 @@ class SearchOutcome(Enum):
     FAILED = "failed"
     TIMED_OUT = "timed_out"
     BUDGET_EXHAUSTED = "budget_exhausted"
+    CANCELLED = "cancelled"
 
 
 @dataclass(frozen=True, slots=True)
@@ -124,15 +126,19 @@ class TreeSearchController:
         """
         return self._active_tree
 
-    def run(self, task: str) -> SearchResult:
+    def run(
+        self, task: str, cancel_event: threading.Event | None = None
+    ) -> SearchResult:
         """Executes the search loop for ``task`` until a terminal phase is reached.
 
-        Both early-stop mechanisms are evaluated once per iteration, before
-        that iteration's expansion begins, so neither interrupts a policy call
-        mid-flight: ``config.max_wall_seconds`` stops the run in the
-        ``TIMED_OUT`` phase, and a satisfied ``stop_condition`` stops it in
-        ``BUDGET_EXHAUSTED``. The deadline is tested first, so a run that
-        crosses both limits in the same iteration is reported as timed out.
+        Every early-stop mechanism is evaluated once per iteration, before
+        that iteration's expansion begins, so none interrupts a policy call
+        mid-flight: a set ``cancel_event`` stops the run in the ``CANCELLED``
+        phase, ``config.max_wall_seconds`` stops it in ``TIMED_OUT``, and a
+        satisfied ``stop_condition`` stops it in ``BUDGET_EXHAUSTED``. They are
+        tested in that order, so a run that crosses several limits in the same
+        iteration reports the first. Cancellation leads because once the
+        caller has stopped waiting, no other limit matters.
         """
         tree = ThoughtTree(task)
         self._active_tree = tree
@@ -148,6 +154,15 @@ class TreeSearchController:
         self._advance(machine, SearchPhase.SELECTION, iteration, None, "search started")
         try:
             while iteration < self._config.max_iterations:
+                if cancel_event is not None and cancel_event.is_set():
+                    self._advance(
+                        machine,
+                        SearchPhase.CANCELLED,
+                        iteration,
+                        None,
+                        "run cancelled by its caller",
+                    )
+                    break
                 if deadline is not None and time.monotonic() >= deadline:
                     self._advance(
                         machine,
@@ -418,4 +433,5 @@ _OUTCOME_BY_PHASE: dict[SearchPhase, SearchOutcome] = {
     SearchPhase.FAILED: SearchOutcome.FAILED,
     SearchPhase.TIMED_OUT: SearchOutcome.TIMED_OUT,
     SearchPhase.BUDGET_EXHAUSTED: SearchOutcome.BUDGET_EXHAUSTED,
+    SearchPhase.CANCELLED: SearchOutcome.CANCELLED,
 }

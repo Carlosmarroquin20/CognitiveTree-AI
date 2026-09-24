@@ -1,5 +1,6 @@
 """End-to-end validation of the search controller against deterministic policies."""
 
+import threading
 import time
 
 from cognitivetree.config import SearchConfig
@@ -222,3 +223,83 @@ def test_generous_wall_clock_budget_does_not_interfere() -> None:
 
 def test_wall_clock_budget_defaults_to_unbounded() -> None:
     assert SearchConfig().max_wall_seconds is None
+
+
+class CancellingGenerator:
+    """Sets the cancellation event while generating its ``trigger_call``-th batch."""
+
+    def __init__(self, cancel_event: threading.Event, trigger_call: int) -> None:
+        self._cancel_event = cancel_event
+        self._trigger_call = trigger_call
+        self.calls = 0
+
+    def generate(self, node: ThoughtNode, k: int) -> list[str]:
+        self.calls += 1
+        if self.calls == self._trigger_call:
+            self._cancel_event.set()
+        return [f"{node.content} thought-{i}" for i in range(k)]
+
+
+def cancellable_controller(
+    generator: CancellingGenerator, **overrides: object
+) -> TreeSearchController:
+    params: dict[str, object] = {
+        "max_iterations": 50,
+        "max_depth": 50,
+        "branching_factor": 2,
+        "seed": 1,
+    }
+    params.update(overrides)
+    return TreeSearchController(
+        config=SearchConfig(**params),  # type: ignore[arg-type]
+        generator=generator,
+        evaluator=NeverTerminalEvaluator(),
+    )
+
+
+def test_cancellation_stops_the_run_at_the_next_iteration_boundary() -> None:
+    cancel = threading.Event()
+    generator = CancellingGenerator(cancel, trigger_call=3)
+    result = cancellable_controller(generator).run("task", cancel_event=cancel)
+
+    # The iteration that observed the signal completes; no later one starts.
+    assert result.outcome is SearchOutcome.CANCELLED
+    assert result.iterations == 3
+    assert generator.calls == 3
+    assert result.phase_history[-1].target is SearchPhase.CANCELLED
+    assert "cancelled" in result.phase_history[-1].note
+    assert result.solution is None
+
+
+def test_pre_set_cancellation_does_no_work() -> None:
+    cancel = threading.Event()
+    cancel.set()
+    generator = CancellingGenerator(cancel, trigger_call=0)
+    result = cancellable_controller(generator).run("task", cancel_event=cancel)
+
+    assert result.outcome is SearchOutcome.CANCELLED
+    assert result.iterations == 0
+    assert generator.calls == 0
+    assert result.node_count == 1
+
+
+def test_cancellation_takes_precedence_over_the_deadline() -> None:
+    cancel = threading.Event()
+    cancel.set()
+    controller = cancellable_controller(
+        CancellingGenerator(cancel, trigger_call=0), max_wall_seconds=1e-9
+    )
+    time.sleep(0.01)
+    assert controller.run("task", cancel_event=cancel).outcome is SearchOutcome.CANCELLED
+
+
+def test_unset_cancellation_event_leaves_the_run_unchanged() -> None:
+    baseline = build_controller(seed=11).run("recover the sequence")
+    observed = build_controller(seed=11).run(
+        "recover the sequence", cancel_event=threading.Event()
+    )
+    assert observed.outcome is baseline.outcome
+    assert observed.iterations == baseline.iterations
+    assert [t.target for t in observed.phase_history] == [
+        t.target for t in baseline.phase_history
+    ]

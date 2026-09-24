@@ -110,3 +110,24 @@ def test_timed_out_mirrors_failed_reachability(phase: SearchPhase) -> None:
     assert machine.phase is phase
     assert machine.can_transition(SearchPhase.FAILED)
     assert machine.can_transition(SearchPhase.TIMED_OUT)
+
+
+_EXTERNAL_STOPS = (
+    SearchPhase.TIMED_OUT,
+    SearchPhase.BUDGET_EXHAUSTED,
+    SearchPhase.CANCELLED,
+)
+
+
+@pytest.mark.parametrize(
+    "phase", sorted(_PATH_TO_PHASE, key=lambda p: p.value), ids=lambda p: p.value
+)
+@pytest.mark.parametrize("stop", _EXTERNAL_STOPS, ids=lambda p: p.value)
+def test_external_stops_mirror_failed_reachability(
+    phase: SearchPhase, stop: SearchPhase
+) -> None:
+    machine = SearchStateMachine()
+    for step in _PATH_TO_PHASE[phase]:
+        machine.transition(step)
+    assert machine.can_transition(SearchPhase.FAILED)
+    assert machine.can_transition(stop)

@@ -77,16 +77,20 @@ stateDiagram-v2
     FAILED --> [*]
     TIMED_OUT --> [*]
     BUDGET_EXHAUSTED --> [*]
+    CANCELLED --> [*]
 ```
 
-Three terminal phases share one universal reachability set, because each
+Four terminal phases share one universal reachability set, because each
 represents an external constraint that can strike from any non-terminal
 phase: `FAILED` when a policy backend raises (the fault is captured on the
 `SearchResult` rather than escaping the run), `TIMED_OUT` when the global
-wall-clock budget elapses (**Global Time Budget** below), and
+wall-clock budget elapses (**Global Time Budget** below),
 `BUDGET_EXHAUSTED` when a consumption ceiling is reached (**Consumption
-Budgets** below). The last two stay distinct because they call for different
-responses: retry later versus raise the quota.
+Budgets** below), and `CANCELLED` when the caller sets the `cancel_event`
+passed to `run()`. The last three stay distinct because they call for
+different responses: retry later, raise the quota, or nothing at all, since
+no one is waiting for the result. Cancellation is checked at the same
+iteration boundary as the other limits, and ahead of them.
 
 ### Search Cycle
 
