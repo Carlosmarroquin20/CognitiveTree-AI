@@ -5,6 +5,9 @@ sandbox image is present; they are skipped otherwise so the suite stays green
 on hosts without Docker.
 """
 
+import subprocess
+import tracemalloc
+
 import pytest
 
 from cognitivetree.sandbox.docker_executor import (
@@ -136,3 +139,41 @@ class TestLiveSandbox:
         )
         assert result.ok, result.stderr
         assert result.stdout.strip() == "65534"
+
+    def test_output_flood_is_clipped_without_buffering_it(self) -> None:
+        executor = DockerSandboxExecutor(
+            DockerSandboxConfig(
+                limits=ResourceLimits(timeout_seconds=30.0, output_limit_chars=1000)
+            )
+        )
+        code = "import sys\nfor _ in range(400): sys.stdout.write('x' * 250_000)"
+        tracemalloc.start()
+        try:
+            result = executor.execute(ExecutionRequest(code=code))
+            _, peak = tracemalloc.get_traced_memory()
+        finally:
+            tracemalloc.stop()
+
+        assert result.ok, result.stderr
+        assert result.truncated
+        assert result.stdout == "x" * 1000
+        assert peak < 5_000_000
+
+    def test_timed_out_container_is_removed(self) -> None:
+        code = "import time\nprint('started', flush=True)\ntime.sleep(60)"
+        executor = DockerSandboxExecutor(
+            DockerSandboxConfig(
+                limits=ResourceLimits(timeout_seconds=2.0), kill_grace_seconds=3.0
+            )
+        )
+        result = executor.execute(ExecutionRequest(code=code))
+
+        assert result.status is ExecutionStatus.TIMEOUT
+        assert result.stdout.strip() == "started"
+        leftovers = subprocess.run(
+            ["docker", "ps", "-a", "--filter", "name=ctree-sbx", "--format", "{{.Names}}"],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        assert leftovers.stdout.strip() == ""

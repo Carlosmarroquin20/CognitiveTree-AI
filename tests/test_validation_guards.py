@@ -8,8 +8,6 @@ about intent; exercised, they are guarantees.
 
 from __future__ import annotations
 
-import subprocess
-
 import pytest
 
 from cognitivetree.llm.client import ChatMessage, CompletionRequest
@@ -20,8 +18,11 @@ from cognitivetree.sandbox.spec import (
     ResourceLimits,
     SandboxError,
     clip_output,
+    decode_captured,
 )
-from cognitivetree.sandbox.subprocess_executor import SubprocessExecutor, _decode_stream
+from cognitivetree.sandbox.subprocess_executor import SubprocessExecutor
+
+REPLACEMENT = chr(0xFFFD)  # what undecodable bytes become
 
 
 class TestResourceLimits:
@@ -138,17 +139,24 @@ class TestSubprocessExecutorErrorPaths:
         assert isinstance(result.stdout, str)
 
     @pytest.mark.parametrize(
-        ("stream", "expected"),
-        [(None, ""), ("text", "text"), (b"bytes", "bytes"), (b"\xff\xfe", "��")],
+        ("data", "truncated", "expected"),
+        [
+            (b"bytes", False, ("bytes", False)),
+            (b"\xff\xfe", False, (REPLACEMENT * 2, False)),
+            (b"abcdef", False, ("abcde", True)),
+            (b"abc", True, ("abc", True)),
+            # A multi-byte character cut by the capture cap decodes to a
+            # replacement character instead of raising.
+            ("é".encode()[:1], True, (REPLACEMENT, True)),
+        ],
     )
-    def test_stream_decoding_covers_every_shape(
-        self, stream: str | bytes | None, expected: str
+    def test_captured_output_decoding_covers_every_shape(
+        self, data: bytes, truncated: bool, expected: tuple[str, bool]
     ) -> None:
-        assert _decode_stream(stream) == expected
+        assert decode_captured(data, truncated, limit_chars=5) == expected
 
-    def test_timeout_expired_carries_no_exit_code(self) -> None:
-        # subprocess.TimeoutExpired is the only path that yields exit_code None.
-        assert issubclass(subprocess.TimeoutExpired, Exception)
+    def test_timeout_carries_no_exit_code(self) -> None:
+        # A child killed at the deadline is the only path that yields None.
         executor = SubprocessExecutor(limits=ResourceLimits(timeout_seconds=1.0))
         result = executor.execute(ExecutionRequest(code="while True: pass"))
         assert result.exit_code is None

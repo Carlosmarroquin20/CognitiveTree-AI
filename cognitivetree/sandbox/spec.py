@@ -40,14 +40,13 @@ class ResourceLimits:
         output_limit_chars: Per-stream cap on captured stdout / stderr;
             oversized output is clipped and flagged, never propagated whole.
 
-    Known limitation: ``output_limit_chars`` bounds what re-enters the
-    framework, not what the payload may emit. Both executors buffer a run's
-    full output before clipping, so a payload printing gigabytes consumes that
-    much host memory first. The container's ``--memory`` cap does not cover
-    this, since the buffering happens in the client process rather than inside
-    the sandbox. Bounding it properly means streaming the pipes and killing
-    the run on overflow; until then, ``timeout_seconds`` is the practical
-    limit on how much a payload can emit.
+    ``output_limit_chars`` also bounds host memory, not only what re-enters
+    the framework: both executors drain the pipes as the payload writes and
+    discard everything past the cap (see
+    :mod:`cognitivetree.sandbox.process`). That matters because the
+    container's ``--memory`` cap cannot cover output buffered by the client
+    process outside the sandbox. A payload that keeps printing is not killed
+    for it; ``timeout_seconds`` still bounds how long it may run.
     """
 
     memory_mb: int = 256
@@ -123,3 +122,23 @@ def clip_output(text: str, limit: int) -> tuple[str, bool]:
     if len(text) <= limit:
         return text, False
     return text[:limit], True
+
+
+def capture_bytes_for(limit_chars: int) -> int:
+    """Returns how many raw bytes to capture to yield ``limit_chars`` characters.
+
+    UTF-8 spends at most four bytes per character, so this many bytes always
+    decode to at least the character limit and clipping stays exact.
+    """
+    return limit_chars * 4
+
+
+def decode_captured(data: bytes, truncated: bool, limit_chars: int) -> tuple[str, bool]:
+    """Decodes a bounded capture and clips it to ``limit_chars`` characters.
+
+    Returns the text and whether anything was dropped, either by the capture
+    cap or by the character clip. A multi-byte character split by the capture
+    cap decodes as a replacement character rather than failing.
+    """
+    text, clipped = clip_output(data.decode("utf-8", errors="replace"), limit_chars)
+    return text, clipped or truncated

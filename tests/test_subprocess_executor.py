@@ -1,5 +1,7 @@
 """Validates the host-process executor's containment behavior."""
 
+import tracemalloc
+
 import pytest
 
 from cognitivetree.sandbox.spec import (
@@ -87,3 +89,33 @@ def test_oversized_output_is_clipped_and_flagged() -> None:
 def test_blank_payload_is_rejected_at_request_construction() -> None:
     with pytest.raises(ValueError):
         ExecutionRequest(code="   ")
+
+
+def test_output_flood_is_clipped_without_buffering_it() -> None:
+    executor = SubprocessExecutor(limits=ResourceLimits(output_limit_chars=1000))
+    code = "import sys\nfor _ in range(400): sys.stdout.write('x' * 250_000)"
+    tracemalloc.start()
+    try:
+        result = executor.execute(ExecutionRequest(code=code))
+        _, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
+
+    assert result.ok
+    assert result.truncated
+    assert result.stdout == "x" * 1000
+    # 100 MB emitted; buffering it whole used to peak near 200 MB.
+    assert peak < 5_000_000
+
+
+def test_line_endings_are_normalized() -> None:
+    result = SubprocessExecutor().execute(ExecutionRequest(code="print('a')\nprint('b')"))
+    assert result.stdout == "a\nb\n"
+
+
+def test_timeout_keeps_partial_output() -> None:
+    executor = SubprocessExecutor(limits=ResourceLimits(timeout_seconds=1.0))
+    code = "import time\nprint('started', flush=True)\ntime.sleep(60)"
+    result = executor.execute(ExecutionRequest(code=code))
+    assert result.status is ExecutionStatus.TIMEOUT
+    assert result.stdout.strip() == "started"

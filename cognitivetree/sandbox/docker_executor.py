@@ -16,13 +16,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
 
+from cognitivetree.sandbox.process import run_bounded
 from cognitivetree.sandbox.spec import (
     ExecutionRequest,
     ExecutionResult,
     ExecutionStatus,
     ResourceLimits,
     SandboxError,
-    clip_output,
+    capture_bytes_for,
+    decode_captured,
 )
 
 DEFAULT_IMAGE = "cognitivetree-sandbox:latest"
@@ -99,58 +101,62 @@ class DockerSandboxExecutor:
         command = self._build_command(name, request)
         started = perf_counter()
         try:
-            completed = subprocess.run(
+            # Streams cross as raw UTF-8 bytes, matching the image's locale.
+            # Text mode would apply the host's conventions instead: its locale
+            # encoding, and on Windows a CRLF translation that leaves a stray
+            # carriage return on every line the Linux payload reads.
+            run = run_bounded(
                 command,
-                # Streams cross as raw UTF-8 bytes, matching the image's locale.
-                # Text mode would apply the host's conventions instead: its
-                # locale encoding, and on Windows a CRLF translation that
-                # leaves a stray carriage return on every line the Linux
-                # payload reads.
-                input=request.stdin.encode("utf-8"),
-                capture_output=True,
+                stdin=request.stdin.encode("utf-8"),
                 timeout=timeout + self._config.kill_grace_seconds,
+                capture_bytes=capture_bytes_for(limits.output_limit_chars),
             )
         except FileNotFoundError as exc:
             raise DockerUnavailableError(
                 f"docker binary {self._config.docker_binary!r} not found"
             ) from exc
-        except subprocess.TimeoutExpired:
+        duration = perf_counter() - started
+
+        stdout, out_dropped = decode_captured(
+            run.stdout, run.stdout_truncated, limits.output_limit_chars
+        )
+        stderr, err_dropped = decode_captured(
+            run.stderr, run.stderr_truncated, limits.output_limit_chars
+        )
+        truncated = out_dropped or err_dropped
+
+        if run.returncode is None:
+            # Killing the CLI client leaves the container running; removing it
+            # is what actually stops the payload.
             self._force_remove(name)
             return ExecutionResult(
                 status=ExecutionStatus.TIMEOUT,
                 exit_code=None,
-                duration_seconds=perf_counter() - started,
-                detail=f"payload exceeded {timeout:.1f}s deadline; container removed",
-            )
-
-        duration = perf_counter() - started
-        stdout, out_clipped = clip_output(
-            completed.stdout.decode("utf-8", errors="replace"), limits.output_limit_chars
-        )
-        stderr, err_clipped = clip_output(
-            completed.stderr.decode("utf-8", errors="replace"), limits.output_limit_chars
-        )
-
-        if completed.returncode >= _DOCKER_CLI_ERROR and _is_cli_fault(
-            completed.returncode, stderr
-        ):
-            return ExecutionResult(
-                status=ExecutionStatus.SANDBOX_ERROR,
-                exit_code=completed.returncode,
                 stdout=stdout,
                 stderr=stderr,
                 duration_seconds=duration,
-                truncated=out_clipped or err_clipped,
+                truncated=truncated,
+                detail=f"payload exceeded {timeout:.1f}s deadline; container removed",
+            )
+
+        if run.returncode >= _DOCKER_CLI_ERROR and _is_cli_fault(run.returncode, stderr):
+            return ExecutionResult(
+                status=ExecutionStatus.SANDBOX_ERROR,
+                exit_code=run.returncode,
+                stdout=stdout,
+                stderr=stderr,
+                duration_seconds=duration,
+                truncated=truncated,
                 detail="docker CLI reported an infrastructure fault",
             )
 
         return ExecutionResult(
             status=ExecutionStatus.COMPLETED,
-            exit_code=completed.returncode,
+            exit_code=run.returncode,
             stdout=stdout,
             stderr=stderr,
             duration_seconds=duration,
-            truncated=out_clipped or err_clipped,
+            truncated=truncated,
         )
 
     def _build_command(self, name: str, request: ExecutionRequest) -> list[str]:

@@ -640,7 +640,12 @@ profile applied at `docker run` time:
 
 Payloads reach the interpreter as an exec-form `python -I -c` argument —
 never through a shell — and captured output is clipped at a configurable
-limit before it re-enters the framework. The image itself ships without
+limit before it re-enters the framework. The pipes are drained as the payload
+writes and everything past the limit is discarded, so host memory stays
+bounded too: a payload printing 100 MB peaks under 5 MB on the host instead
+of the ~200 MB that buffering the whole output cost. The container's
+`--memory` cap cannot protect against that, because the buffer lives in the
+client process outside the sandbox. The image itself ships without
 `pip`/`setuptools`, so a compromised payload cannot install dependencies.
 
 Execution outcomes are classified in three tiers: `COMPLETED` (the payload
