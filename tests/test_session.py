@@ -10,14 +10,30 @@ from conftest import EndlessRun
 from cognitivetree.config import SearchConfig
 from cognitivetree.persistence import ReplaySession, load_run
 from cognitivetree.policies import Evaluation
-from cognitivetree.search import SearchOutcome, TreeSearchController
+from cognitivetree.search import SearchOutcome, SearchResult, TreeSearchController
 from cognitivetree.session import EventSink, ReasoningSession, build_reference_session
 from cognitivetree.state import SearchPhase
 
 
+def _execution_trace(result: SearchResult) -> str:
+    """Summarizes every candidate's execution record for a failure message."""
+    lines = []
+    for node in result.tree.nodes():
+        record = node.metadata.get("execution")
+        if record is not None:
+            lines.append(
+                f"{record['status']} exit={record['exit_code']} "
+                f"{record['duration_seconds']}s {record['detail']!r} "
+                f"stderr={record['stderr'][-300:]!r}"
+            )
+    return "\n".join(lines) or "(no candidate was executed)"
+
+
 def test_reference_session_runs_to_success() -> None:
     result = build_reference_session().run()
-    assert result.outcome is SearchOutcome.SUCCEEDED
+    # The run depends on live sandbox executions; when it fails on a CI
+    # runner, the execution records are the only evidence of why.
+    assert result.outcome is SearchOutcome.SUCCEEDED, _execution_trace(result)
     assert result.solution is not None
 
 
