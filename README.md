@@ -638,8 +638,12 @@ profile applied at `docker run` time:
 | CPU / processes | `--cpus`, `--pids-limit` | Quota enforcement; fork bombs bounded |
 | Lifetime | `--rm` + deadline kill | Timed-out containers are force-removed |
 
-Payloads reach the interpreter as an exec-form `python -I -c` argument —
-never through a shell — and captured output is clipped at a configurable
+The interpreter is launched exec-form — never through a shell — with a fixed
+bootstrap of under 1 KB, and the payload code follows over stdin. Its size is
+therefore not bound by the command line (about 32k characters on Windows,
+where longer payloads used to fail to spawn), and it never appears in process
+listings or `docker inspect`. Tracebacks and exit codes match a plain
+`python -I -c` run byte for byte. Captured output is clipped at a configurable
 limit before it re-enters the framework. The pipes are drained as the payload
 writes and everything past the limit is discarded, so host memory stays
 bounded too: a payload printing 100 MB peaks under 5 MB on the host instead

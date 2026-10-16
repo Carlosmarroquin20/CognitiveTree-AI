@@ -15,6 +15,7 @@ from cognitivetree.sandbox.docker_executor import (
     DockerSandboxExecutor,
     ensure_image,
 )
+from cognitivetree.sandbox.payload import BOOTSTRAP
 from cognitivetree.sandbox.spec import (
     ExecutionRequest,
     ExecutionStatus,
@@ -55,11 +56,18 @@ class TestCommandProfile:
         assert "--cpus 0.5" in joined
         assert "--pids-limit 32" in joined
 
-    def test_payload_is_passed_exec_form_not_shell(self) -> None:
+    def test_interpreter_is_launched_exec_form_with_the_bootstrap(self) -> None:
         command = self.build()
-        assert command[-4:] == ["python", "-I", "-c", "pass"]
+        assert command[-4:] == ["python", "-I", "-c", BOOTSTRAP]
         assert "sh" not in command
         assert "bash" not in command
+
+    def test_payload_code_never_reaches_the_command_line(self) -> None:
+        executor = DockerSandboxExecutor()
+        command = executor._build_command(
+            "ctree-sbx-test", ExecutionRequest(code="SECRET_MARKER = 1")
+        )
+        assert not any("SECRET_MARKER" in part for part in command)
 
 
 def test_availability_probe_returns_bool() -> None:
@@ -177,3 +185,21 @@ class TestLiveSandbox:
             timeout=30,
         )
         assert leftovers.stdout.strip() == ""
+
+    def test_payload_beyond_the_windows_command_line_limit_runs(self) -> None:
+        code = "x = 1\n" + "# padding\n" * 4000 + "print(x)"
+        assert len(code) > 32_767
+        result = self.executor.execute(ExecutionRequest(code=code))
+        assert result.ok, result.stderr
+        assert result.stdout.strip() == "1"
+
+    def test_failure_traceback_hides_the_bootstrap(self) -> None:
+        code = "def f():\n    raise ValueError('boom')\nf()"
+        result = self.executor.execute(ExecutionRequest(code=code))
+        assert result.exit_code == 1
+        assert result.stderr.splitlines() == [
+            "Traceback (most recent call last):",
+            '  File "<string>", line 3, in <module>',
+            '  File "<string>", line 2, in f',
+            "ValueError: boom",
+        ]

@@ -3,8 +3,11 @@
 Every run receives a fresh, disposable container with a defense-in-depth
 profile: no network, read-only root filesystem, dropped capabilities, blocked
 privilege escalation, an unprivileged user, and hard memory / CPU / process
-caps. Payloads reach the interpreter as an exec-form argument — never through
-a shell — and the container is force-removed on timeout.
+caps. The interpreter is launched exec-form — never through a shell — with
+a fixed bootstrap, and the payload code follows over stdin (see
+:mod:`cognitivetree.sandbox.payload`), so it is bound neither by the command
+line limit nor visible in process listings or ``docker inspect``. The
+container is force-removed on timeout.
 """
 
 from __future__ import annotations
@@ -16,6 +19,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from time import perf_counter
 
+from cognitivetree.sandbox.payload import BOOTSTRAP, frame_payload
 from cognitivetree.sandbox.process import run_bounded
 from cognitivetree.sandbox.spec import (
     ExecutionRequest,
@@ -107,7 +111,7 @@ class DockerSandboxExecutor:
             # carriage return on every line the Linux payload reads.
             run = run_bounded(
                 command,
-                stdin=request.stdin.encode("utf-8"),
+                stdin=frame_payload(request.code, request.stdin),
                 timeout=timeout + self._config.kill_grace_seconds,
                 capture_bytes=capture_bytes_for(limits.output_limit_chars),
             )
@@ -196,7 +200,7 @@ class DockerSandboxExecutor:
             "python",
             "-I",
             "-c",
-            request.code,
+            BOOTSTRAP,
         ]
 
     def _force_remove(self, name: str) -> None:
