@@ -12,6 +12,7 @@ from __future__ import annotations
 import sys
 from time import perf_counter
 
+from cognitivetree.sandbox.payload import BOOTSTRAP, frame_payload
 from cognitivetree.sandbox.process import run_bounded
 from cognitivetree.sandbox.spec import (
     ExecutionRequest,
@@ -32,7 +33,9 @@ class SubprocessExecutor:
     security boundary. ``-X utf8`` pins the child's standard streams to UTF-8:
     on a host whose locale encoding is narrower (cp1252 on most Windows
     installs), a correct payload printing a non-Latin character would
-    otherwise crash on output and be graded as a failure.
+    otherwise crash on output and be graded as a failure. The code itself
+    travels over stdin (see :mod:`cognitivetree.sandbox.payload`), so its
+    size is not bound by the command line limit.
     """
 
     def __init__(
@@ -46,13 +49,13 @@ class SubprocessExecutor:
     def execute(self, request: ExecutionRequest) -> ExecutionResult:
         """Executes ``request`` in a child process under the configured deadline."""
         timeout = request.timeout_seconds or self._limits.timeout_seconds
-        command = [self._python, "-X", "utf8", "-I", "-c", request.code]
+        command = [self._python, "-X", "utf8", "-I", "-c", BOOTSTRAP]
         limit = self._limits.output_limit_chars
         started = perf_counter()
         try:
             run = run_bounded(
                 command,
-                stdin=request.stdin.encode("utf-8"),
+                stdin=frame_payload(request.code, request.stdin),
                 timeout=timeout,
                 capture_bytes=capture_bytes_for(limit),
             )
