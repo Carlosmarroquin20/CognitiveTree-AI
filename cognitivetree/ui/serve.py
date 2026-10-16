@@ -27,6 +27,7 @@ from pathlib import Path
 
 from cognitivetree.config import SearchConfig
 from cognitivetree.llm.caching import CompletionCache
+from cognitivetree.llm.openai_compatible import API_KEY_ENV_VAR
 from cognitivetree.observability.logs import LOG_FORMATS, configure_logging
 from cognitivetree.session import (
     LlmSessionSpec,
@@ -35,8 +36,6 @@ from cognitivetree.session import (
     build_reference_session,
 )
 from cognitivetree.ui.server import SessionFactory, StreamingUiServer
-
-API_KEY_ENV_VAR = "COGNITIVETREE_API_KEY"
 
 # Named explicitly: run as ``python -m``, ``__name__`` is ``__main__``, which
 # tells an operator reading the logs nothing about where a line came from.

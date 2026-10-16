@@ -24,6 +24,10 @@ from cognitivetree.llm.client import (
 
 logger = logging.getLogger(__name__)
 
+# Environment variable the command-line tools read the bearer token from;
+# arguments would expose it in shell history and process listings.
+API_KEY_ENV_VAR = "COGNITIVETREE_API_KEY"
+
 _RETRYABLE_STATUS_FLOOR = 500
 
 # Rate limiting is transient by definition: local servers such as vLLM and
