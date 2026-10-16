@@ -280,6 +280,7 @@ backend, which runs no model and would silently never fire them.
 | `cognitivetree/persistence/replay.py` | `ReplaySession`: re-streams an archive through the live envelope vocabulary |
 | `cognitivetree/persistence/demo.py` | Archive a timed-out run, discard it, reopen and diagnose it offline |
 | `cognitivetree/benchmark/suite.py` | `BenchmarkTask` contract and the bundled search suite (terminal-only feedback) |
+| `cognitivetree/benchmark/llm_tasks.py` | Self-checking coding problems run through the LLM stack, with offline and live suites |
 | `cognitivetree/benchmark/runner.py` | Runner, `BenchmarkReport`, scaling curve, and head-to-head comparison |
 | `cognitivetree/benchmark/run.py` | CLI: `python -m cognitivetree.benchmark.run` |
 
@@ -467,7 +468,7 @@ dies by — **solve rate as a function of the compute budget**:
 python -m cognitivetree.benchmark.run --budgets 10 40 120
 ```
 ```text
-compute scaling curve
+compute scaling curve (synthetic suite)
     budget  solve rate  mean iters  wall (ms)
         10         50%         7.8        2.9
         40         67%        19.3        7.4
@@ -518,6 +519,50 @@ its keep by producing results like that.
 was really a lucky tie-break shows up as variance. `--archive-dir` writes
 every run to a JSON archive (see below), so a surprising row can be reopened
 and inspected later.
+
+### LLM-backed coding tasks
+
+The synthetic suite measures search effort, but it calls no model, so it
+cannot compare anything on the model side. `--suite llm` runs four
+self-checking coding problems (clamp, run-length encoding, bracket
+balancing, interval merging) through the production LLM stack: prompting,
+`### CANDIDATE` parsing, sandboxed validation, critique, and revision. Each
+row then reports the tokens it spent.
+
+Every problem ships with a reference solution and plausible broken variants,
+and the tests prove the harness accepts the first and rejects every one of
+the second. A harness that accepted a wrong answer would let a model score a
+solve it never earned. The reference never reaches a live model; it exists to
+validate the harness and to drive `--suite llm-offline`, where a scripted
+client proposes the broken variants first and the reference once revision
+notes arrive. That runs the full fail, critique, revise, succeed cycle with
+no model at all.
+
+```bash
+# Against a real model; the key, if the endpoint needs one, comes from COGNITIVETREE_API_KEY
+python -m cognitivetree.benchmark.run --suite llm --budgets 4 10 \
+    --base-url http://localhost:11434/v1 --model llama3.3
+
+# What completion caching saves, measured offline: two repeats of every task
+python -m cognitivetree.benchmark.run --suite llm-offline --budgets 10 --repeats 2
+python -m cognitivetree.benchmark.run --suite llm-offline --budgets 10 --repeats 2 --cache-completions
+```
+```text
+compute scaling curve (llm-offline suite)
+    budget  solve rate  mean iters  wall (ms)   tokens
+        10       100%         2.0     2246.6     3526
+
+compute scaling curve (llm-offline suite)
+    budget  solve rate  mean iters  wall (ms)   tokens
+        10       100%         2.0     2198.3     1763
+  completion cache: 8 hits, 8 misses (50% hit rate)
+```
+
+With the cache shared across runs, the repeat of every task is served
+entirely from it, which halves the total. The offline suite defaults to
+temperature 0 so that comparison is meaningful. Against a live model,
+`--temperature` defaults to the generator's tuned 0.7, where the cache
+deliberately never hits; set `--temperature 0` to measure it there.
 
 ## Run Persistence and Replay
 
