@@ -10,6 +10,13 @@ Its headline metric is deliberately the one a test-time compute framework
 lives or dies by: solve rate as a function of the compute budget.
 """
 
+from cognitivetree.benchmark.llm_tasks import (
+    CODING_PROBLEMS,
+    CodingProblem,
+    llm_suite,
+    llm_task,
+    offline_llm_suite,
+)
 from cognitivetree.benchmark.runner import (
     BenchmarkReport,
     TaskResult,
@@ -25,13 +32,18 @@ from cognitivetree.benchmark.suite import (
 )
 
 __all__ = [
+    "CODING_PROBLEMS",
     "BenchmarkReport",
     "BenchmarkTask",
+    "CodingProblem",
     "TaskResult",
     "TaskSetup",
     "TerminalOnlyEvaluator",
     "compare_reports",
     "default_suite",
+    "llm_suite",
+    "llm_task",
+    "offline_llm_suite",
     "run_benchmark",
     "scaling_curve",
 ]
