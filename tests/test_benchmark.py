@@ -316,3 +316,66 @@ class TestCli:
         payload = json.loads(destination.read_text(encoding="utf-8"))
         assert payload[0]["label"] == "budget=10"
         assert "results" in payload[0]
+
+
+class TestSuiteSelection:
+    """--suite chooses between the synthetic and the LLM-backed tasks."""
+
+    def test_synthetic_suite_is_the_default_and_reports_no_tokens(self, capsys) -> None:
+        main(["--budgets", "10"])
+        out = capsys.readouterr().out
+        assert "(synthetic suite)" in out
+        assert "tokens" not in out
+
+    def test_offline_llm_suite_reports_tokens(self, capsys) -> None:
+        main(["--suite", "llm-offline", "--budgets", "10"])
+        out = capsys.readouterr().out
+        assert "(llm-offline suite)" in out
+        assert "tokens" in out
+        assert "100%" in out
+
+    def test_shared_cache_reports_its_hits(self, capsys) -> None:
+        argv = ["--suite", "llm-offline", "--budgets", "10", "--repeats", "2"]
+        main([*argv, "--cache-completions"])
+        out = capsys.readouterr().out
+        assert "completion cache: 8 hits, 8 misses (50% hit rate)" in out
+
+    def test_live_suite_requires_an_endpoint(self) -> None:
+        with pytest.raises(SystemExit, match="--base-url, --model"):
+            main(["--suite", "llm", "--budgets", "1"])
+
+    @pytest.mark.parametrize(
+        "argv", [["--cache-completions"], ["--temperature", "0"]], ids=["cache", "temperature"]
+    )
+    def test_model_options_are_refused_for_the_synthetic_suite(self, argv: list[str]) -> None:
+        with pytest.raises(SystemExit, match="need an LLM suite"):
+            main(["--budgets", "1", *argv])
+
+    def test_out_of_range_temperature_is_rejected(self) -> None:
+        with pytest.raises(SystemExit, match="temperature"):
+            main(["--suite", "llm-offline", "--budgets", "1", "--temperature", "3"])
+
+    def test_live_suite_reads_the_key_from_the_environment(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        from cognitivetree.benchmark import run
+        from cognitivetree.llm.openai_compatible import API_KEY_ENV_VAR
+
+        created: list[dict[str, object]] = []
+
+        class RecordingClient:
+            def __init__(self, **kwargs: object) -> None:
+                created.append(kwargs)
+
+        monkeypatch.setenv(API_KEY_ENV_VAR, "env-token")
+        monkeypatch.setattr(run, "OpenAICompatibleClient", RecordingClient)
+        args = build_parser().parse_args(
+            ["--suite", "llm", "--base-url", "http://localhost:11434/v1", "--model", "m"]
+        )
+        tasks, cache = run.select_tasks(args)
+        tasks[0].build(SearchConfig())
+
+        assert cache is None
+        assert created == [
+            {"base_url": "http://localhost:11434/v1", "model": "m", "api_key": "env-token"}
+        ]
