@@ -110,10 +110,13 @@ const metricsEl = document.getElementById("metrics");
 
 const GLYPHS = { pending: "?", evaluated: "*", terminal: "#", pruned: "x", failed: "!" };
 
+// Node content is model output, so it is untrusted. Serializing a text node
+// escapes only &, < and >, which is not enough inside an attribute value: an
+// unescaped quote would let content open a new attribute such as onmouseover.
+const HTML_ESCAPES = { "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" };
+
 function esc(text) {
-  const div = document.createElement("div");
-  div.textContent = text;
-  return div.innerHTML;
+  return String(text).replace(/[&<>"']/g, char => HTML_ESCAPES[char]);
 }
 
 function appendLog(env) {

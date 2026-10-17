@@ -193,3 +193,14 @@ def test_disconnecting_client_cancels_the_live_run(endless_run: EndlessRun) -> N
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_page_escapes_quotes_in_untrusted_node_content() -> None:
+    # Node content is model output and lands inside a title="..." attribute.
+    # Escaping that misses quotes lets content open an event-handler
+    # attribute, which was verified exploitable in a browser before the fix.
+    from cognitivetree.ui.page import PAGE_HTML
+
+    assert '\'"\': "&quot;"' in PAGE_HTML
+    assert '"\'": "&#39;"' in PAGE_HTML
+    assert "div.innerHTML" not in PAGE_HTML
