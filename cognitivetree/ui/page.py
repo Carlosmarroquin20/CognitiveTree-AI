@@ -6,6 +6,9 @@ plain: a phase log on the left, the live thought tree on the right, and the
 accepted solution below once the run terminates.
 """
 
+import base64
+import hashlib
+
 PAGE_HTML = """<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -60,6 +63,7 @@ PAGE_HTML = """<!DOCTYPE html>
   .content { overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
              max-width: 46em; }
   .stats { color: var(--dim2); font-size: 11px; flex-shrink: 0; }
+  #meta { color: var(--dim2); }
   .st-evaluated .glyph { color: var(--accent); }
   .st-terminal  .glyph { color: var(--ok); }
   .st-terminal  .content { color: var(--ok); }
@@ -82,7 +86,7 @@ PAGE_HTML = """<!DOCTYPE html>
 <header>
   <h1>CognitiveTree-AI</h1>
   <span id="status" class="running">connecting</span>
-  <span id="meta" style="color: var(--dim2)"></span>
+  <span id="meta"></span>
 </header>
 <div id="metrics"></div>
 <main>
@@ -196,3 +200,27 @@ source.onerror = () => {
 </body>
 </html>
 """
+
+
+def _inline_hash(tag: str) -> str:
+    """Returns the CSP source expression for the page's single inline ``tag``."""
+    body = PAGE_HTML.split(f"<{tag}>", 1)[1].split(f"</{tag}>", 1)[0]
+    digest = hashlib.sha256(body.encode("utf-8")).digest()
+    return f"'sha256-{base64.b64encode(digest).decode('ascii')}'"
+
+
+# Allows exactly the page's own script and stylesheet, identified by hash so
+# the policy can never drift from the markup it protects. Node content is
+# model output; should escaping ever fail again, injected handlers, scripts,
+# and inline styles are refused by the browser instead of executed.
+PAGE_CSP = "; ".join(
+    (
+        "default-src 'none'",
+        f"script-src {_inline_hash('script')}",
+        f"style-src {_inline_hash('style')}",
+        "connect-src 'self'",
+        "base-uri 'none'",
+        "form-action 'none'",
+        "frame-ancestors 'none'",
+    )
+)

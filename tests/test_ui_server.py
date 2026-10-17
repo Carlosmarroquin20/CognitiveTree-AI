@@ -204,3 +204,54 @@ def test_page_escapes_quotes_in_untrusted_node_content() -> None:
     assert '\'"\': "&quot;"' in PAGE_HTML
     assert '"\'": "&#39;"' in PAGE_HTML
     assert "div.innerHTML" not in PAGE_HTML
+
+
+class TestSecurityHeaders:
+    """The page ships a policy that pins its own script and stylesheet."""
+
+    def test_page_carries_csp_referrer_and_nosniff(self) -> None:
+        from cognitivetree.ui.page import PAGE_CSP
+
+        with LiveServer() as live:
+            connection = http.client.HTTPConnection("127.0.0.1", live.port, timeout=30)
+            connection.request("GET", "/")
+            response = connection.getresponse()
+            response.read()
+            connection.close()
+        assert response.getheader("Content-Security-Policy") == PAGE_CSP
+        assert response.getheader("Referrer-Policy") == "no-referrer"
+        assert response.getheader("X-Content-Type-Options") == "nosniff"
+
+    def test_error_responses_are_not_sniffed(self) -> None:
+        with LiveServer() as live:
+            connection = http.client.HTTPConnection("127.0.0.1", live.port, timeout=30)
+            connection.request("GET", "/nope")
+            response = connection.getresponse()
+            response.read()
+            connection.close()
+        assert response.status == 404
+        assert response.getheader("X-Content-Type-Options") == "nosniff"
+
+    def test_policy_hashes_match_the_served_markup(self) -> None:
+        import base64
+        import hashlib
+        import re
+
+        from cognitivetree.ui.page import PAGE_CSP, PAGE_HTML
+
+        for tag, directive in (("script", "script-src"), ("style", "style-src")):
+            # One block per tag, or the hash would leave the others blocked.
+            assert PAGE_HTML.count(f"<{tag}>") == 1
+            body = re.search(f"<{tag}>(.*?)</{tag}>", PAGE_HTML, re.DOTALL)
+            assert body is not None
+            digest = base64.b64encode(hashlib.sha256(body.group(1).encode()).digest())
+            assert f"{directive} 'sha256-{digest.decode()}'" in PAGE_CSP
+
+    def test_policy_forbids_everything_it_does_not_name(self) -> None:
+        from cognitivetree.ui.page import PAGE_CSP, PAGE_HTML
+
+        assert PAGE_CSP.startswith("default-src 'none'")
+        assert "unsafe-inline" not in PAGE_CSP
+        assert "frame-ancestors 'none'" in PAGE_CSP
+        # Inline style attributes would be refused under a hash-only style-src.
+        assert "style=" not in PAGE_HTML

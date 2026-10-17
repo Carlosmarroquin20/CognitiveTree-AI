@@ -380,6 +380,14 @@ that disconnects cancels it: the run stops at its next iteration boundary in
 the `cancelled` phase instead of spending model quota and sandbox time for no
 one. `--max-concurrent-runs` (default 4) bounds how many run at once.
 
+The page renders model output, which is untrusted, so it treats it that way
+twice over. Node content is escaped for both text and attribute positions,
+and the page ships a Content-Security-Policy that allows only its own inline
+script and stylesheet, pinned by SHA-256 hash and computed from the markup
+itself so the two cannot drift. Should escaping ever fail, injected
+handlers, scripts, and styles are refused by the browser rather than run.
+Every response also carries `X-Content-Type-Options: nosniff`.
+
 | SSE event | Payload | Emitted |
 |-----------|---------|---------|
 | `phase` | iteration, phase, node id, detail | every state-machine transition |

@@ -9,7 +9,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Protocol, runtime_checkable
 
 from cognitivetree.ui.events import format_sse
-from cognitivetree.ui.page import PAGE_HTML
+from cognitivetree.ui.page import PAGE_CSP, PAGE_HTML
 
 logger = logging.getLogger(__name__)
 
@@ -60,6 +60,8 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_response(200)
         self.send_header("Content-Type", "text/html; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
+        self.send_header("Content-Security-Policy", PAGE_CSP)
+        self.send_header("Referrer-Policy", "no-referrer")
         self.end_headers()
         self.wfile.write(body)
 
@@ -111,6 +113,12 @@ class _Handler(BaseHTTPRequestHandler):
         self.send_header("Retry-After", str(_BUSY_RETRY_AFTER_SECONDS))
         self.end_headers()
         self.wfile.write(body)
+
+    def end_headers(self) -> None:
+        # Every response, the event stream and error pages included, is
+        # served with the type it declares and never sniffed into another.
+        self.send_header("X-Content-Type-Options", "nosniff")
+        super().end_headers()
 
     def log_message(self, format: str, *args: object) -> None:
         """Redirects access logging to the module logger."""
